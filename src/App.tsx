@@ -17,17 +17,32 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore'
+import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import interactionPlugin from '@fullcalendar/interaction'
+import zhCnLocale from '@fullcalendar/core/locales/zh-cn'
 import { auth, db } from './firebase'
 import './App.css'
 
 type StepStatus = 'done' | 'current' | 'todo'
 type Priority = 'high' | 'middle' | 'low'
 type CompanyStatus = 'active' | 'waiting' | 'passed' | 'rejected' | 'declined'
+type EventType = 'deadline' | 'seminar' | 'interview' | 'webtest' | 'submission' | 'other'
 
 type SelectionStep = {
   id: number
   name: string
   status: StepStatus
+}
+
+type JobEvent = {
+  id: number
+  title: string
+  type: EventType
+  start: string
+  end: string
+  memo: string
 }
 
 type Company = {
@@ -43,6 +58,7 @@ type Company = {
   loginPassword?: string
   memo?: string
   steps: SelectionStep[]
+  events: JobEvent[]
 }
 
 type CompanyForm = {
@@ -57,16 +73,17 @@ type CompanyForm = {
   loginPassword: string
   memo: string
   steps: SelectionStep[]
+  events: JobEvent[]
 }
 
 const defaultSteps: SelectionStep[] = [
-  { id: 1, name: 'Entry', status: 'done' },
-  { id: 2, name: '説明会', status: 'current' },
-  { id: 3, name: 'ES', status: 'todo' },
-  { id: 4, name: 'Webテスト', status: 'todo' },
+  { id: 1, name: '投递', status: 'done' },
+  { id: 2, name: '公司说明会', status: 'current' },
+  { id: 3, name: '申请表 / ES', status: 'todo' },
+  { id: 4, name: '网测', status: 'todo' },
   { id: 5, name: '一面', status: 'todo' },
   { id: 6, name: '二面', status: 'todo' },
-  { id: 7, name: '最終', status: 'todo' },
+  { id: 7, name: '最终面试', status: 'todo' },
 ]
 
 const createEmptyForm = (): CompanyForm => ({
@@ -81,23 +98,24 @@ const createEmptyForm = (): CompanyForm => ({
   loginPassword: '',
   memo: '',
   steps: defaultSteps.map((step) => ({ ...step })),
+  events: [],
 })
 
 function getAuthErrorMessage(error: unknown) {
   if (!(error instanceof Error)) {
-    return 'ログインまたは登録に失敗しました'
+    return '登录或注册失败'
   }
 
   if (error.message.includes('auth/email-already-in-use')) {
-    return 'このメールアドレスはすでに登録されています'
+    return '这个邮箱已经注册过了'
   }
 
   if (error.message.includes('auth/invalid-email')) {
-    return 'メールアドレスの形式が正しくありません'
+    return '邮箱格式不正确'
   }
 
   if (error.message.includes('auth/weak-password')) {
-    return 'パスワードは6文字以上にしてください'
+    return '密码请设置为 6 位以上'
   }
 
   if (
@@ -105,10 +123,10 @@ function getAuthErrorMessage(error: unknown) {
     error.message.includes('auth/user-not-found') ||
     error.message.includes('auth/wrong-password')
   ) {
-    return 'メールアドレスまたはパスワードが違います'
+    return '邮箱或密码不正确'
   }
 
-  return 'ログインまたは登録に失敗しました'
+  return '登录或注册失败'
 }
 
 function getPriorityLabel(priority: Priority) {
@@ -118,11 +136,32 @@ function getPriorityLabel(priority: Priority) {
 }
 
 function getStatusLabel(status: CompanyStatus) {
-  if (status === 'active') return '進行中'
-  if (status === 'waiting') return '結果待ち'
-  if (status === 'passed') return '通過/内定'
-  if (status === 'rejected') return '落選'
+  if (status === 'active') return '进行中'
+  if (status === 'waiting') return '等待结果'
+  if (status === 'passed') return '通过 / 内定'
+  if (status === 'rejected') return '落选'
   return '辞退'
+}
+
+function getEventTypeLabel(type: EventType) {
+  if (type === 'deadline') return 'DDL'
+  if (type === 'seminar') return '说明会'
+  if (type === 'interview') return '面试'
+  if (type === 'webtest') return '网测'
+  if (type === 'submission') return '提交材料'
+  return '其他'
+}
+
+function applyCurrentStep(steps: SelectionStep[], currentIndex: number) {
+  return steps.map((step, index) => ({
+    ...step,
+    status:
+      index < currentIndex
+        ? 'done'
+        : index === currentIndex
+          ? 'current'
+          : 'todo',
+  }))
 }
 
 function App() {
@@ -186,6 +225,7 @@ function App() {
             loginPassword: data.loginPassword ?? '',
             memo: data.memo ?? '',
             steps: data.steps ?? [],
+            events: data.events ?? [],
           }
         })
 
@@ -195,7 +235,7 @@ function App() {
       (error) => {
         console.error(error)
         setCompaniesLoading(false)
-        alert('会社情報の読み込みに失敗しました')
+        alert('读取公司信息失败')
       }
     )
 
@@ -210,6 +250,10 @@ function App() {
     }
 
     return companies.filter((company) => {
+      const eventText = company.events
+        .map((event) => `${event.title} ${getEventTypeLabel(event.type)} ${event.memo}`)
+        .join(' ')
+
       const targetText = [
         company.name,
         company.position,
@@ -219,6 +263,7 @@ function App() {
         company.loginId,
         company.memo,
         company.steps.map((step) => step.name).join(' '),
+        eventText,
       ]
         .join(' ')
         .toLowerCase()
@@ -227,22 +272,42 @@ function App() {
     })
   }, [companies, searchKeyword])
 
+  const calendarEvents = useMemo(() => {
+    return companies.flatMap((company) =>
+      company.events
+        .filter((event) => event.title.trim() && event.start)
+        .map((event) => ({
+          id: `${company.id}-${event.id}`,
+          title: `${company.name}｜${event.title}`,
+          start: event.start,
+          end: event.end || undefined,
+          extendedProps: {
+            companyName: company.name,
+            eventTitle: event.title,
+            eventType: getEventTypeLabel(event.type),
+            memo: event.memo,
+            companyId: company.id,
+          },
+        }))
+    )
+  }, [companies])
+
   const handleAuth = async () => {
     setAuthError('')
 
     if (!email || !password) {
-      setAuthError('メールアドレスとパスワードを入力してください')
+      setAuthError('请输入邮箱和密码')
       return
     }
 
     if (isRegisterMode) {
       if (password.length < 6) {
-        setAuthError('パスワードは6文字以上にしてください')
+        setAuthError('密码请设置为 6 位以上')
         return
       }
 
       if (password !== passwordConfirm) {
-        setAuthError('確認用パスワードが一致していません')
+        setAuthError('两次输入的密码不一致')
         return
       }
     }
@@ -271,7 +336,10 @@ function App() {
     setVisiblePasswords({})
   }
 
-  const updateFormField = (field: keyof CompanyForm, value: string) => {
+  const updateFormField = <K extends keyof CompanyForm>(
+    field: K,
+    value: CompanyForm[K]
+  ) => {
     setForm((prev) => ({
       ...prev,
       [field]: value,
@@ -283,15 +351,6 @@ function App() {
       ...prev,
       steps: prev.steps.map((step) =>
         step.id === stepId ? { ...step, name: value } : step
-      ),
-    }))
-  }
-
-  const updateStepStatus = (stepId: number, value: StepStatus) => {
-    setForm((prev) => ({
-      ...prev,
-      steps: prev.steps.map((step) =>
-        step.id === stepId ? { ...step, status: value } : step
       ),
     }))
   }
@@ -314,6 +373,43 @@ function App() {
     setForm((prev) => ({
       ...prev,
       steps: prev.steps.filter((step) => step.id !== stepId),
+    }))
+  }
+
+  const addEvent = () => {
+    setForm((prev) => ({
+      ...prev,
+      events: [
+        ...prev.events,
+        {
+          id: Date.now(),
+          title: '',
+          type: 'deadline',
+          start: '',
+          end: '',
+          memo: '',
+        },
+      ],
+    }))
+  }
+
+  const updateEvent = <K extends keyof JobEvent>(
+    eventId: number,
+    field: K,
+    value: JobEvent[K]
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      events: prev.events.map((event) =>
+        event.id === eventId ? { ...event, [field]: value } : event
+      ),
+    }))
+  }
+
+  const deleteEvent = (eventId: number) => {
+    setForm((prev) => ({
+      ...prev,
+      events: prev.events.filter((event) => event.id !== eventId),
     }))
   }
 
@@ -347,6 +443,17 @@ function App() {
               status: step.status,
             }))
           : defaultSteps.map((step) => ({ ...step })),
+      events:
+        company.events.length > 0
+          ? company.events.map((event, index) => ({
+              id: event.id || Date.now() + index,
+              title: event.title,
+              type: event.type,
+              start: event.start,
+              end: event.end,
+              memo: event.memo,
+            }))
+          : [],
     })
 
     setEditingCompanyId(company.id)
@@ -356,23 +463,52 @@ function App() {
 
   const saveCompany = async () => {
     if (!user) {
-      alert('ログインしてください')
+      alert('请先登录')
       return
     }
 
     if (!form.name.trim()) {
-      alert('会社名を入力してください')
+      alert('请输入公司名')
       return
     }
 
     const validSteps = form.steps
       .filter((step) => step.name.trim() !== '')
-      .map((step) => ({ ...step, name: step.name.trim() }))
+      .map((step, index) => ({
+        ...step,
+        id: step.id || Date.now() + index,
+        name: step.name.trim(),
+      }))
 
     if (validSteps.length === 0) {
-      alert('選考フローを1つ以上入力してください')
+      alert('请至少输入一个选考阶段')
       return
     }
+
+    const validEvents = form.events
+      .filter((event) => event.title.trim() !== '' || event.start !== '')
+      .map((event, index) => ({
+        id: event.id || Date.now() + index,
+        title: event.title.trim(),
+        type: event.type,
+        start: event.start,
+        end: event.end,
+        memo: event.memo.trim(),
+      }))
+
+    const invalidEvent = validEvents.find(
+      (event) => event.title.trim() === '' || event.start.trim() === ''
+    )
+
+    if (invalidEvent) {
+      alert('活动需要至少填写标题和开始时间')
+      return
+    }
+
+    const hasCurrentStep = validSteps.some((step) => step.status === 'current')
+    const normalizedSteps = hasCurrentStep
+      ? validSteps
+      : applyCurrentStep(validSteps, 0)
 
     const companyData = {
       name: form.name.trim(),
@@ -385,7 +521,8 @@ function App() {
       loginId: form.loginId.trim(),
       loginPassword: form.loginPassword,
       memo: form.memo.trim(),
-      steps: validSteps,
+      steps: normalizedSteps,
+      events: validEvents,
       updatedAt: serverTimestamp(),
     }
 
@@ -404,7 +541,7 @@ function App() {
       setIsFormOpen(false)
     } catch (error) {
       console.error(error)
-      alert('会社情報の保存に失敗しました')
+      alert('保存公司信息失败')
     }
   }
 
@@ -413,7 +550,7 @@ function App() {
       return
     }
 
-    const ok = window.confirm(`${company.name} を削除しますか？`)
+    const ok = window.confirm(`确定要删除 ${company.name} 吗？`)
 
     if (!ok) {
       return
@@ -423,7 +560,28 @@ function App() {
       await deleteDoc(doc(db, 'users', user.uid, 'companies', company.id))
     } catch (error) {
       console.error(error)
-      alert('会社情報の削除に失敗しました')
+      alert('删除公司信息失败')
+    }
+  }
+
+  const setCurrentStep = async (company: Company, currentIndex: number) => {
+    if (!user) {
+      return
+    }
+
+    const updatedSteps = applyCurrentStep(company.steps, currentIndex)
+    const currentStepName = updatedSteps[currentIndex]?.name ?? company.nextAction
+
+    try {
+      const companyRef = doc(db, 'users', user.uid, 'companies', company.id)
+      await updateDoc(companyRef, {
+        steps: updatedSteps,
+        nextAction: currentStepName,
+        updatedAt: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      alert('选考流程更新失败')
     }
   }
 
@@ -435,7 +593,7 @@ function App() {
   }
 
   if (authLoading) {
-    return <div className="auth-page">読み込み中...</div>
+    return <div className="auth-page">加载中...</div>
   }
 
   if (!user) {
@@ -443,10 +601,10 @@ function App() {
       <main className="auth-page">
         <section className="auth-card">
           <h1>JobFlow</h1>
-          <p>就活情報を管理するため、ログインしてください。</p>
+          <p>请登录后管理你的求职进度和公司账号信息。</p>
 
           <label>
-            メールアドレス
+            邮箱
             <input
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -455,32 +613,32 @@ function App() {
           </label>
 
           <label>
-            パスワード
+            密码
             <div className="inline-input-button">
               <input
                 type={showAuthPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="6文字以上"
+                placeholder="至少 6 位"
               />
               <button
                 type="button"
                 className="mini-button"
                 onClick={() => setShowAuthPassword((prev) => !prev)}
               >
-                {showAuthPassword ? '隠す' : '表示'}
+                {showAuthPassword ? '隐藏' : '显示'}
               </button>
             </div>
           </label>
 
           {isRegisterMode && (
             <label>
-              パスワード確認
+              确认密码
               <input
                 type={showAuthPassword ? 'text' : 'password'}
                 value={passwordConfirm}
                 onChange={(event) => setPasswordConfirm(event.target.value)}
-                placeholder="もう一度入力"
+                placeholder="请再输入一次密码"
               />
             </label>
           )}
@@ -488,7 +646,7 @@ function App() {
           {authError && <p className="error-text">{authError}</p>}
 
           <button className="primary-button auth-button" onClick={handleAuth}>
-            {isRegisterMode ? '新規登録' : 'ログイン'}
+            {isRegisterMode ? '注册' : '登录'}
           </button>
 
           <button
@@ -501,8 +659,8 @@ function App() {
             }}
           >
             {isRegisterMode
-              ? 'すでにアカウントを持っている方はこちら'
-              : '初めて使う方はこちらから登録'}
+              ? '已有账号？点击登录'
+              : '第一次使用？点击注册'}
           </button>
         </section>
       </main>
@@ -514,30 +672,30 @@ function App() {
       <header className="header app-header-row">
         <div>
           <h1>JobFlow</h1>
-          <p>就活の選考進捗・DDL・面接予定を管理するアプリ</p>
-          <p className="login-user">ログイン中：{user.email}</p>
+          <p>求职进度、DDL、面试安排和公司账号信息管理工具</p>
+          <p className="login-user">当前登录：{user.email}</p>
         </div>
 
         <button className="secondary-button" onClick={handleLogout}>
-          ログアウト
+          退出登录
         </button>
       </header>
 
       <section className="toolbar toolbar-row">
-        <button onClick={openAddForm}>＋会社を追加</button>
+        <button onClick={openAddForm}>＋添加公司</button>
 
         <input
           className="search-input"
           value={searchKeyword}
           onChange={(event) => setSearchKeyword(event.target.value)}
-          placeholder="会社名・職種・メモなどで検索"
+          placeholder="按公司名、职位、备注、活动等搜索"
         />
       </section>
 
       {isFormOpen && (
         <section className="form-card">
           <div className="form-header">
-            <h2>{editingCompanyId ? '会社を編集' : '会社を追加'}</h2>
+            <h2>{editingCompanyId ? '编辑公司' : '添加公司'}</h2>
             <button
               className="secondary-button"
               onClick={() => {
@@ -545,37 +703,37 @@ function App() {
                 setIsFormOpen(false)
               }}
             >
-              閉じる
+              关闭
             </button>
           </div>
 
           <div className="form-grid">
             <label>
-              会社名
+              公司名
               <input
                 value={form.name}
                 onChange={(event) => updateFormField('name', event.target.value)}
-                placeholder="例：フィールズ株式会社"
+                placeholder="例：Fields 株式会社"
               />
             </label>
 
             <label>
-              職種
+              应聘职位
               <input
                 value={form.position}
                 onChange={(event) =>
                   updateFormField('position', event.target.value)
                 }
-                placeholder="例：デザイナー職"
+                placeholder="例：设计师职位"
               />
             </label>
 
             <label>
-              優先度
+              优先度
               <select
                 value={form.priority}
                 onChange={(event) =>
-                  updateFormField('priority', event.target.value)
+                  updateFormField('priority', event.target.value as Priority)
                 }
               >
                 <option value="high">高</option>
@@ -585,34 +743,34 @@ function App() {
             </label>
 
             <label>
-              状態
+              状态
               <select
                 value={form.status}
                 onChange={(event) =>
-                  updateFormField('status', event.target.value)
+                  updateFormField('status', event.target.value as CompanyStatus)
                 }
               >
-                <option value="active">進行中</option>
-                <option value="waiting">結果待ち</option>
-                <option value="passed">通過/内定</option>
-                <option value="rejected">落選</option>
+                <option value="active">进行中</option>
+                <option value="waiting">等待结果</option>
+                <option value="passed">通过 / 内定</option>
+                <option value="rejected">落选</option>
                 <option value="declined">辞退</option>
               </select>
             </label>
 
             <label>
-              次にやること
+              下一步要做
               <input
                 value={form.nextAction}
                 onChange={(event) =>
                   updateFormField('nextAction', event.target.value)
                 }
-                placeholder="例：ES＋ポートフォリオ提出"
+                placeholder="例：提交 ES 和作品集"
               />
             </label>
 
             <label>
-              DDL / 予定
+              DDL / 预定
               <input
                 value={form.deadline}
                 onChange={(event) =>
@@ -623,7 +781,7 @@ function App() {
             </label>
 
             <label>
-              My Page URL
+              My Page 网址
               <input
                 value={form.myPageUrl}
                 onChange={(event) =>
@@ -634,43 +792,43 @@ function App() {
             </label>
 
             <label>
-              My Page ログインID / メール
+              My Page 登录 ID / 邮箱
               <input
                 value={form.loginId}
                 onChange={(event) =>
                   updateFormField('loginId', event.target.value)
                 }
-                placeholder="メールアドレスなど"
+                placeholder="邮箱或登录 ID"
               />
             </label>
 
             <label>
-              My Page パスワード
+              My Page 密码
               <input
                 type="password"
                 value={form.loginPassword}
                 onChange={(event) =>
                   updateFormField('loginPassword', event.target.value)
                 }
-                placeholder="パスワード"
+                placeholder="密码"
               />
             </label>
           </div>
 
           <label className="memo-field">
-            メモ
+            备注
             <textarea
               value={form.memo}
               onChange={(event) => updateFormField('memo', event.target.value)}
-              placeholder="メール内容、提出物、志望動機メモなど"
+              placeholder="邮件内容、提交材料、志望动机、面试准备等"
             />
           </label>
 
           <div className="steps-editor">
             <div className="steps-editor-header">
-              <h3>選考フロー</h3>
+              <h3>选考流程</h3>
               <button className="secondary-button" onClick={addStep}>
-                ＋段階を追加
+                ＋添加阶段
               </button>
             </div>
 
@@ -686,47 +844,143 @@ function App() {
                   placeholder="例：ES"
                 />
 
-                <select
-                  value={step.status}
-                  onChange={(event) =>
-                    updateStepStatus(step.id, event.target.value as StepStatus)
-                  }
-                >
-                  <option value="done">完了</option>
-                  <option value="current">次にやる</option>
-                  <option value="todo">未着手</option>
-                </select>
+                <span className={`step ${step.status}`}>
+                  {step.status === 'done'
+                    ? '已完成'
+                    : step.status === 'current'
+                      ? '下一步'
+                      : '未开始'}
+                </span>
 
                 <button
                   className="danger-button"
                   onClick={() => deleteStep(step.id)}
                 >
-                  削除
+                  删除
                 </button>
+              </div>
+            ))}
+
+            <p className="form-hint">
+              提示：添加或编辑公司时只需要填写阶段名称。之后可以直接点击公司卡片上的某个阶段来更新当前进度。
+            </p>
+          </div>
+
+          <div className="events-editor">
+            <div className="steps-editor-header">
+              <h3>活动 / DDL</h3>
+              <button className="secondary-button" onClick={addEvent}>
+                ＋添加活动
+              </button>
+            </div>
+
+            {form.events.length === 0 && (
+              <p className="form-hint">
+                还没有活动。可以添加说明会、ES截止、网测期限、面试时间等。
+              </p>
+            )}
+
+            {form.events.map((event) => (
+              <div className="event-editor-card" key={event.id}>
+                <div className="event-editor-grid">
+                  <label>
+                    活动标题
+                    <input
+                      value={event.title}
+                      onChange={(inputEvent) =>
+                        updateEvent(event.id, 'title', inputEvent.target.value)
+                      }
+                      placeholder="例：ES提交截止 / 一面"
+                    />
+                  </label>
+
+                  <label>
+                    类型
+                    <select
+                      value={event.type}
+                      onChange={(inputEvent) =>
+                        updateEvent(
+                          event.id,
+                          'type',
+                          inputEvent.target.value as EventType
+                        )
+                      }
+                    >
+                      <option value="deadline">DDL</option>
+                      <option value="seminar">说明会</option>
+                      <option value="interview">面试</option>
+                      <option value="webtest">网测</option>
+                      <option value="submission">提交材料</option>
+                      <option value="other">其他</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    开始时间
+                    <input
+                      type="datetime-local"
+                      value={event.start}
+                      onChange={(inputEvent) =>
+                        updateEvent(event.id, 'start', inputEvent.target.value)
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    结束时间，可选
+                    <input
+                      type="datetime-local"
+                      value={event.end}
+                      onChange={(inputEvent) =>
+                        updateEvent(event.id, 'end', inputEvent.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+
+                <label className="memo-field">
+                  活动备注
+                  <textarea
+                    value={event.memo}
+                    onChange={(inputEvent) =>
+                      updateEvent(event.id, 'memo', inputEvent.target.value)
+                    }
+                    placeholder="例：Zoom链接、携带材料、面试官信息等"
+                  />
+                </label>
+
+                <div className="form-actions">
+                  <button
+                    className="danger-button"
+                    onClick={() => deleteEvent(event.id)}
+                  >
+                    删除活动
+                  </button>
+                </div>
               </div>
             ))}
           </div>
 
           <div className="form-actions">
             <button className="primary-button" onClick={saveCompany}>
-              {editingCompanyId ? '更新する' : '追加する'}
+              {editingCompanyId ? '更新' : '添加'}
             </button>
           </div>
         </section>
       )}
 
       <section className="company-list">
-        {companiesLoading && <div className="empty-card">読み込み中...</div>}
+        {companiesLoading && <div className="empty-card">加载中...</div>}
 
         {!companiesLoading && companies.length === 0 && (
           <div className="empty-card">
-            まだ会社情報がありません。まずは「＋会社を追加」から登録してください。
+            还没有公司信息。请先点击“＋添加公司”进行登记。
           </div>
         )}
 
         {!companiesLoading && companies.length > 0 && filteredCompanies.length === 0 && (
           <div className="empty-card">
-            検索条件に一致する会社がありません。
+            没有找到符合搜索条件的公司。
           </div>
         )}
 
@@ -736,10 +990,10 @@ function App() {
               <div className="company-header">
                 <div>
                   <h2>{company.name}</h2>
-                  <p>{company.position || '職種未入力'}</p>
+                  <p>{company.position || '未填写职位'}</p>
                   <div className="badge-row">
                     <span className={`badge priority-${company.priority}`}>
-                      優先度：{getPriorityLabel(company.priority)}
+                      优先度：{getPriorityLabel(company.priority)}
                     </span>
                     <span className={`badge status-${company.status}`}>
                       {getStatusLabel(company.status)}
@@ -757,13 +1011,13 @@ function App() {
                       className="secondary-button"
                       onClick={() => openEditForm(company)}
                     >
-                      編集
+                      编辑
                     </button>
                     <button
                       className="danger-button"
                       onClick={() => removeCompany(company)}
                     >
-                      削除
+                      删除
                     </button>
                   </div>
                 </div>
@@ -772,7 +1026,14 @@ function App() {
               <div className="flow">
                 {company.steps.map((step, index) => (
                   <div className="step-wrap" key={`${company.id}-${step.id}`}>
-                    <span className={`step ${step.status}`}>{step.name}</span>
+                    <button
+                      type="button"
+                      className={`step step-button ${step.status}`}
+                      onClick={() => setCurrentStep(company, index)}
+                      title="点击后将此阶段设为下一步"
+                    >
+                      {step.name}
+                    </button>
                     {index < company.steps.length - 1 && (
                       <span className="arrow">→</span>
                     )}
@@ -782,8 +1043,21 @@ function App() {
 
               {company.nextAction && (
                 <div className="next-action">
-                  <strong>次にやること：</strong>
+                  <strong>下一步：</strong>
                   {company.nextAction}
+                </div>
+              )}
+
+              {company.events.length > 0 && (
+                <div className="company-events">
+                  <strong>活动：</strong>
+                  <div className="company-event-list">
+                    {company.events.map((event) => (
+                      <span className="company-event-chip" key={event.id}>
+                        {getEventTypeLabel(event.type)}：{event.title}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -803,14 +1077,14 @@ function App() {
 
                 {company.loginId && (
                   <p>
-                    <strong>ログインID：</strong>
+                    <strong>登录 ID：</strong>
                     {company.loginId}
                   </p>
                 )}
 
                 {company.loginPassword && (
                   <p className="password-row">
-                    <strong>パスワード：</strong>
+                    <strong>密码：</strong>
                     <span>
                       {visiblePasswords[company.id]
                         ? company.loginPassword
@@ -820,20 +1094,65 @@ function App() {
                       className="mini-button"
                       onClick={() => toggleCompanyPassword(company.id)}
                     >
-                      {visiblePasswords[company.id] ? '隠す' : '表示'}
+                      {visiblePasswords[company.id] ? '隐藏' : '显示'}
                     </button>
                   </p>
                 )}
 
                 {company.memo && (
                   <p>
-                    <strong>メモ：</strong>
+                    <strong>备注：</strong>
                     {company.memo}
                   </p>
                 )}
               </div>
             </article>
           ))}
+      </section>
+
+      <section className="calendar-section">
+        <div className="calendar-header">
+          <h2>日历</h2>
+          <p>公司词条中添加的活动会自动显示在这里。</p>
+        </div>
+
+        <div className="calendar-card">
+          <FullCalendar
+            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+            locales={[zhCnLocale]}
+            locale="zh-cn"
+            initialView="dayGridMonth"
+            height="auto"
+            events={calendarEvents}
+            headerToolbar={{
+              left: 'prev,next today',
+              center: 'title',
+              right: 'dayGridMonth,timeGridWeek,timeGridDay',
+            }}
+            buttonText={{
+              today: '今天',
+              month: '月',
+              week: '周',
+              day: '日',
+            }}
+            eventClick={(info) => {
+              const props = info.event.extendedProps
+
+              alert(
+                [
+                  `公司：${props.companyName}`,
+                  `活动：${props.eventTitle}`,
+                  `类型：${props.eventType}`,
+                  `开始：${info.event.start?.toLocaleString() ?? ''}`,
+                  `结束：${info.event.end?.toLocaleString() ?? '未设置'}`,
+                  props.memo ? `备注：${props.memo}` : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n')
+              )
+            }}
+          />
+        </div>
       </section>
     </main>
   )
