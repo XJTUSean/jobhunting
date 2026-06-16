@@ -416,3 +416,126 @@ textarea {
     grid-column: 2;
   }
 }
+
+.toolbar-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.search-input {
+  flex: 1;
+  max-width: 420px;
+}
+
+.inline-input-button {
+  display: flex;
+  gap: 8px;
+}
+
+.inline-input-button input {
+  flex: 1;
+}
+
+.card-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.priority-high {
+  background: #fff2f2;
+  color: #c62828;
+}
+
+.priority-middle {
+  background: #fff8e1;
+  color: #ef6c00;
+}
+
+.priority-low {
+  background: #eef5ff;
+  color: #1565c0;
+}
+
+.status-active {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-waiting {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.status-passed {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.status-rejected {
+  background: #eeeeee;
+  color: #555;
+}
+
+.status-declined {
+  background: #eeeeee;
+  color: #555;
+}
+
+.password-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mini-button {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: white;
+  color: #222;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    max-width: none;
+  }
+
+  .card-side {
+    align-items: flex-start;
+  }
+
+  .card-actions {
+    width: 100%;
+  }
+}

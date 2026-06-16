@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { User } from 'firebase/auth'
 import {
   createUserWithEmailAndPassword,
@@ -6,10 +6,23 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth'
-import { auth } from './firebase'
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+} from 'firebase/firestore'
+import { auth, db } from './firebase'
 import './App.css'
 
 type StepStatus = 'done' | 'current' | 'todo'
+type Priority = 'high' | 'middle' | 'low'
+type CompanyStatus = 'active' | 'waiting' | 'passed' | 'rejected' | 'declined'
 
 type SelectionStep = {
   id: number
@@ -18,11 +31,13 @@ type SelectionStep = {
 }
 
 type Company = {
-  id: number
+  id: string
   name: string
   position: string
   nextAction: string
   deadline: string
+  priority: Priority
+  status: CompanyStatus
   myPageUrl?: string
   loginId?: string
   loginPassword?: string
@@ -35,6 +50,8 @@ type CompanyForm = {
   position: string
   nextAction: string
   deadline: string
+  priority: Priority
+  status: CompanyStatus
   myPageUrl: string
   loginId: string
   loginPassword: string
@@ -52,16 +69,60 @@ const defaultSteps: SelectionStep[] = [
   { id: 7, name: '最終', status: 'todo' },
 ]
 
-const emptyForm: CompanyForm = {
+const createEmptyForm = (): CompanyForm => ({
   name: '',
   position: '',
   nextAction: '',
   deadline: '',
+  priority: 'middle',
+  status: 'active',
   myPageUrl: '',
   loginId: '',
   loginPassword: '',
   memo: '',
   steps: defaultSteps.map((step) => ({ ...step })),
+})
+
+function getAuthErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'ログインまたは登録に失敗しました'
+  }
+
+  if (error.message.includes('auth/email-already-in-use')) {
+    return 'このメールアドレスはすでに登録されています'
+  }
+
+  if (error.message.includes('auth/invalid-email')) {
+    return 'メールアドレスの形式が正しくありません'
+  }
+
+  if (error.message.includes('auth/weak-password')) {
+    return 'パスワードは6文字以上にしてください'
+  }
+
+  if (
+    error.message.includes('auth/invalid-credential') ||
+    error.message.includes('auth/user-not-found') ||
+    error.message.includes('auth/wrong-password')
+  ) {
+    return 'メールアドレスまたはパスワードが違います'
+  }
+
+  return 'ログインまたは登録に失敗しました'
+}
+
+function getPriorityLabel(priority: Priority) {
+  if (priority === 'high') return '高'
+  if (priority === 'middle') return '中'
+  return '低'
+}
+
+function getStatusLabel(status: CompanyStatus) {
+  if (status === 'active') return '進行中'
+  if (status === 'waiting') return '結果待ち'
+  if (status === 'passed') return '通過/内定'
+  if (status === 'rejected') return '落選'
+  return '辞退'
 }
 
 function App() {
@@ -71,11 +132,19 @@ function App() {
   const [isRegisterMode, setIsRegisterMode] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [showAuthPassword, setShowAuthPassword] = useState(false)
   const [authError, setAuthError] = useState('')
 
   const [companies, setCompanies] = useState<Company[]>([])
+  const [companiesLoading, setCompaniesLoading] = useState(false)
+
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [form, setForm] = useState<CompanyForm>(emptyForm)
+  const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null)
+  const [form, setForm] = useState<CompanyForm>(createEmptyForm)
+
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({})
+  const [searchKeyword, setSearchKeyword] = useState('')
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -86,6 +155,78 @@ function App() {
     return () => unsubscribe()
   }, [])
 
+  useEffect(() => {
+    if (!user) {
+      setCompanies([])
+      setCompaniesLoading(false)
+      return
+    }
+
+    setCompaniesLoading(true)
+
+    const companiesRef = collection(db, 'users', user.uid, 'companies')
+    const companiesQuery = query(companiesRef, orderBy('createdAt', 'desc'))
+
+    const unsubscribe = onSnapshot(
+      companiesQuery,
+      (snapshot) => {
+        const loadedCompanies: Company[] = snapshot.docs.map((document) => {
+          const data = document.data()
+
+          return {
+            id: document.id,
+            name: data.name ?? '',
+            position: data.position ?? '',
+            nextAction: data.nextAction ?? '',
+            deadline: data.deadline ?? '',
+            priority: data.priority ?? 'middle',
+            status: data.status ?? 'active',
+            myPageUrl: data.myPageUrl ?? '',
+            loginId: data.loginId ?? '',
+            loginPassword: data.loginPassword ?? '',
+            memo: data.memo ?? '',
+            steps: data.steps ?? [],
+          }
+        })
+
+        setCompanies(loadedCompanies)
+        setCompaniesLoading(false)
+      },
+      (error) => {
+        console.error(error)
+        setCompaniesLoading(false)
+        alert('会社情報の読み込みに失敗しました')
+      }
+    )
+
+    return () => unsubscribe()
+  }, [user])
+
+  const filteredCompanies = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase()
+
+    if (!keyword) {
+      return companies
+    }
+
+    return companies.filter((company) => {
+      const targetText = [
+        company.name,
+        company.position,
+        company.nextAction,
+        company.deadline,
+        company.myPageUrl,
+        company.loginId,
+        company.memo,
+        company.steps.map((step) => step.name).join(' '),
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return targetText.includes(keyword)
+    })
+  }, [companies, searchKeyword])
+
   const handleAuth = async () => {
     setAuthError('')
 
@@ -94,21 +235,40 @@ function App() {
       return
     }
 
+    if (isRegisterMode) {
+      if (password.length < 6) {
+        setAuthError('パスワードは6文字以上にしてください')
+        return
+      }
+
+      if (password !== passwordConfirm) {
+        setAuthError('確認用パスワードが一致していません')
+        return
+      }
+    }
+
     try {
       if (isRegisterMode) {
         await createUserWithEmailAndPassword(auth, email, password)
       } else {
         await signInWithEmailAndPassword(auth, email, password)
       }
+
+      setPassword('')
+      setPasswordConfirm('')
     } catch (error) {
       console.error(error)
-      setAuthError('ログインまたは登録に失敗しました')
+      setAuthError(getAuthErrorMessage(error))
     }
   }
 
   const handleLogout = async () => {
     await signOut(auth)
     setCompanies([])
+    setIsFormOpen(false)
+    setEditingCompanyId(null)
+    setForm(createEmptyForm())
+    setVisiblePasswords({})
   }
 
   const updateFormField = (field: keyof CompanyForm, value: string) => {
@@ -158,36 +318,120 @@ function App() {
   }
 
   const resetForm = () => {
-    setForm({
-      ...emptyForm,
-      steps: defaultSteps.map((step) => ({ ...step })),
-    })
+    setForm(createEmptyForm())
+    setEditingCompanyId(null)
   }
 
-  const addCompany = () => {
+  const openAddForm = () => {
+    resetForm()
+    setIsFormOpen(true)
+  }
+
+  const openEditForm = (company: Company) => {
+    setForm({
+      name: company.name,
+      position: company.position,
+      nextAction: company.nextAction,
+      deadline: company.deadline,
+      priority: company.priority,
+      status: company.status,
+      myPageUrl: company.myPageUrl ?? '',
+      loginId: company.loginId ?? '',
+      loginPassword: company.loginPassword ?? '',
+      memo: company.memo ?? '',
+      steps:
+        company.steps.length > 0
+          ? company.steps.map((step, index) => ({
+              id: step.id || Date.now() + index,
+              name: step.name,
+              status: step.status,
+            }))
+          : defaultSteps.map((step) => ({ ...step })),
+    })
+
+    setEditingCompanyId(company.id)
+    setIsFormOpen(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const saveCompany = async () => {
+    if (!user) {
+      alert('ログインしてください')
+      return
+    }
+
     if (!form.name.trim()) {
       alert('会社名を入力してください')
       return
     }
 
-    const newCompany: Company = {
-      id: Date.now(),
-      name: form.name,
-      position: form.position,
-      nextAction: form.nextAction,
-      deadline: form.deadline,
-      myPageUrl: form.myPageUrl,
-      loginId: form.loginId,
-      loginPassword: form.loginPassword,
-      memo: form.memo,
-      steps: form.steps
-        .filter((step) => step.name.trim() !== '')
-        .map((step) => ({ ...step })),
+    const validSteps = form.steps
+      .filter((step) => step.name.trim() !== '')
+      .map((step) => ({ ...step, name: step.name.trim() }))
+
+    if (validSteps.length === 0) {
+      alert('選考フローを1つ以上入力してください')
+      return
     }
 
-    setCompanies((prev) => [newCompany, ...prev])
-    resetForm()
-    setIsFormOpen(false)
+    const companyData = {
+      name: form.name.trim(),
+      position: form.position.trim(),
+      nextAction: form.nextAction.trim(),
+      deadline: form.deadline.trim(),
+      priority: form.priority,
+      status: form.status,
+      myPageUrl: form.myPageUrl.trim(),
+      loginId: form.loginId.trim(),
+      loginPassword: form.loginPassword,
+      memo: form.memo.trim(),
+      steps: validSteps,
+      updatedAt: serverTimestamp(),
+    }
+
+    try {
+      if (editingCompanyId) {
+        const companyRef = doc(db, 'users', user.uid, 'companies', editingCompanyId)
+        await updateDoc(companyRef, companyData)
+      } else {
+        await addDoc(collection(db, 'users', user.uid, 'companies'), {
+          ...companyData,
+          createdAt: serverTimestamp(),
+        })
+      }
+
+      resetForm()
+      setIsFormOpen(false)
+    } catch (error) {
+      console.error(error)
+      alert('会社情報の保存に失敗しました')
+    }
+  }
+
+  const removeCompany = async (company: Company) => {
+    if (!user) {
+      return
+    }
+
+    const ok = window.confirm(`${company.name} を削除しますか？`)
+
+    if (!ok) {
+      return
+    }
+
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'companies', company.id))
+    } catch (error) {
+      console.error(error)
+      alert('会社情報の削除に失敗しました')
+    }
+  }
+
+  const toggleCompanyPassword = (companyId: string) => {
+    setVisiblePasswords((prev) => ({
+      ...prev,
+      [companyId]: !prev[companyId],
+    }))
   }
 
   if (authLoading) {
@@ -199,7 +443,7 @@ function App() {
       <main className="auth-page">
         <section className="auth-card">
           <h1>JobFlow</h1>
-          <p>就活情報を安全に管理するため、ログインしてください。</p>
+          <p>就活情報を管理するため、ログインしてください。</p>
 
           <label>
             メールアドレス
@@ -212,13 +456,34 @@ function App() {
 
           <label>
             パスワード
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="6文字以上"
-            />
+            <div className="inline-input-button">
+              <input
+                type={showAuthPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="6文字以上"
+              />
+              <button
+                type="button"
+                className="mini-button"
+                onClick={() => setShowAuthPassword((prev) => !prev)}
+              >
+                {showAuthPassword ? '隠す' : '表示'}
+              </button>
+            </div>
           </label>
+
+          {isRegisterMode && (
+            <label>
+              パスワード確認
+              <input
+                type={showAuthPassword ? 'text' : 'password'}
+                value={passwordConfirm}
+                onChange={(event) => setPasswordConfirm(event.target.value)}
+                placeholder="もう一度入力"
+              />
+            </label>
+          )}
 
           {authError && <p className="error-text">{authError}</p>}
 
@@ -231,6 +496,8 @@ function App() {
             onClick={() => {
               setIsRegisterMode((prev) => !prev)
               setAuthError('')
+              setPassword('')
+              setPasswordConfirm('')
             }}
           >
             {isRegisterMode
@@ -256,14 +523,21 @@ function App() {
         </button>
       </header>
 
-      <section className="toolbar">
-        <button onClick={() => setIsFormOpen(true)}>＋会社を追加</button>
+      <section className="toolbar toolbar-row">
+        <button onClick={openAddForm}>＋会社を追加</button>
+
+        <input
+          className="search-input"
+          value={searchKeyword}
+          onChange={(event) => setSearchKeyword(event.target.value)}
+          placeholder="会社名・職種・メモなどで検索"
+        />
       </section>
 
       {isFormOpen && (
         <section className="form-card">
           <div className="form-header">
-            <h2>会社を追加</h2>
+            <h2>{editingCompanyId ? '会社を編集' : '会社を追加'}</h2>
             <button
               className="secondary-button"
               onClick={() => {
@@ -294,6 +568,36 @@ function App() {
                 }
                 placeholder="例：デザイナー職"
               />
+            </label>
+
+            <label>
+              優先度
+              <select
+                value={form.priority}
+                onChange={(event) =>
+                  updateFormField('priority', event.target.value)
+                }
+              >
+                <option value="high">高</option>
+                <option value="middle">中</option>
+                <option value="low">低</option>
+              </select>
+            </label>
+
+            <label>
+              状態
+              <select
+                value={form.status}
+                onChange={(event) =>
+                  updateFormField('status', event.target.value)
+                }
+              >
+                <option value="active">進行中</option>
+                <option value="waiting">結果待ち</option>
+                <option value="passed">通過/内定</option>
+                <option value="rejected">落選</option>
+                <option value="declined">辞退</option>
+              </select>
             </label>
 
             <label>
@@ -404,87 +708,132 @@ function App() {
           </div>
 
           <div className="form-actions">
-            <button className="primary-button" onClick={addCompany}>
-              追加する
+            <button className="primary-button" onClick={saveCompany}>
+              {editingCompanyId ? '更新する' : '追加する'}
             </button>
           </div>
         </section>
       )}
 
       <section className="company-list">
-        {companies.length === 0 && (
+        {companiesLoading && <div className="empty-card">読み込み中...</div>}
+
+        {!companiesLoading && companies.length === 0 && (
           <div className="empty-card">
             まだ会社情報がありません。まずは「＋会社を追加」から登録してください。
           </div>
         )}
 
-        {companies.map((company) => (
-          <article className="company-card" key={company.id}>
-            <div className="company-header">
-              <div>
-                <h2>{company.name}</h2>
-                <p>{company.position || '職種未入力'}</p>
-              </div>
-              {company.deadline && (
-                <span className="deadline">{company.deadline}</span>
-              )}
-            </div>
+        {!companiesLoading && companies.length > 0 && filteredCompanies.length === 0 && (
+          <div className="empty-card">
+            検索条件に一致する会社がありません。
+          </div>
+        )}
 
-            <div className="flow">
-              {company.steps.map((step, index) => (
-                <div className="step-wrap" key={step.id}>
-                  <span className={`step ${step.status}`}>{step.name}</span>
-                  {index < company.steps.length - 1 && (
-                    <span className="arrow">→</span>
-                  )}
+        {!companiesLoading &&
+          filteredCompanies.map((company) => (
+            <article className="company-card" key={company.id}>
+              <div className="company-header">
+                <div>
+                  <h2>{company.name}</h2>
+                  <p>{company.position || '職種未入力'}</p>
+                  <div className="badge-row">
+                    <span className={`badge priority-${company.priority}`}>
+                      優先度：{getPriorityLabel(company.priority)}
+                    </span>
+                    <span className={`badge status-${company.status}`}>
+                      {getStatusLabel(company.status)}
+                    </span>
+                  </div>
                 </div>
-              ))}
-            </div>
 
-            {company.nextAction && (
-              <div className="next-action">
-                <strong>次にやること：</strong>
-                {company.nextAction}
+                <div className="card-side">
+                  {company.deadline && (
+                    <span className="deadline">{company.deadline}</span>
+                  )}
+
+                  <div className="card-actions">
+                    <button
+                      className="secondary-button"
+                      onClick={() => openEditForm(company)}
+                    >
+                      編集
+                    </button>
+                    <button
+                      className="danger-button"
+                      onClick={() => removeCompany(company)}
+                    >
+                      削除
+                    </button>
+                  </div>
+                </div>
               </div>
-            )}
 
-            <div className="company-extra">
-              {company.myPageUrl && (
-                <p>
-                  <strong>My Page：</strong>
-                  <a
-                    href={company.myPageUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {company.myPageUrl}
-                  </a>
-                </p>
+              <div className="flow">
+                {company.steps.map((step, index) => (
+                  <div className="step-wrap" key={`${company.id}-${step.id}`}>
+                    <span className={`step ${step.status}`}>{step.name}</span>
+                    {index < company.steps.length - 1 && (
+                      <span className="arrow">→</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {company.nextAction && (
+                <div className="next-action">
+                  <strong>次にやること：</strong>
+                  {company.nextAction}
+                </div>
               )}
 
-              {company.loginId && (
-                <p>
-                  <strong>ログインID：</strong>
-                  {company.loginId}
-                </p>
-              )}
+              <div className="company-extra">
+                {company.myPageUrl && (
+                  <p>
+                    <strong>My Page：</strong>
+                    <a
+                      href={company.myPageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {company.myPageUrl}
+                    </a>
+                  </p>
+                )}
 
-              {company.loginPassword && (
-                <p>
-                  <strong>パスワード：</strong>
-                  {'•'.repeat(Math.min(company.loginPassword.length, 12))}
-                </p>
-              )}
+                {company.loginId && (
+                  <p>
+                    <strong>ログインID：</strong>
+                    {company.loginId}
+                  </p>
+                )}
 
-              {company.memo && (
-                <p>
-                  <strong>メモ：</strong>
-                  {company.memo}
-                </p>
-              )}
-            </div>
-          </article>
-        ))}
+                {company.loginPassword && (
+                  <p className="password-row">
+                    <strong>パスワード：</strong>
+                    <span>
+                      {visiblePasswords[company.id]
+                        ? company.loginPassword
+                        : '••••••••••••'}
+                    </span>
+                    <button
+                      className="mini-button"
+                      onClick={() => toggleCompanyPassword(company.id)}
+                    >
+                      {visiblePasswords[company.id] ? '隠す' : '表示'}
+                    </button>
+                  </p>
+                )}
+
+                {company.memo && (
+                  <p>
+                    <strong>メモ：</strong>
+                    {company.memo}
+                  </p>
+                )}
+              </div>
+            </article>
+          ))}
       </section>
     </main>
   )
