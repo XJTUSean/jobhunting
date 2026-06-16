@@ -9,6 +9,25 @@ body {
   font-family: Arial, "Hiragino Sans", "Yu Gothic", sans-serif;
 }
 
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+button {
+  transition: 0.15s ease;
+}
+
+button:hover {
+  opacity: 0.85;
+}
+
+/* =========================
+   Main App Layout
+========================= */
+
 .app {
   max-width: 1100px;
   margin: 0 auto;
@@ -29,11 +48,28 @@ body {
   color: #666;
 }
 
+.app-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.login-user {
+  font-size: 14px;
+  color: #777;
+}
+
+/* =========================
+   Buttons
+========================= */
+
 .toolbar {
   margin-bottom: 24px;
 }
 
-.toolbar button {
+.toolbar button,
+.primary-button {
   border: none;
   border-radius: 10px;
   background: #111;
@@ -42,6 +78,190 @@ body {
   font-size: 15px;
   cursor: pointer;
 }
+
+.secondary-button {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  background: white;
+  color: #222;
+  padding: 9px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.danger-button {
+  border: none;
+  border-radius: 8px;
+  background: #fff2f2;
+  color: #c62828;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.text-button {
+  border: none;
+  background: transparent;
+  color: #1565c0;
+  cursor: pointer;
+  margin-top: 16px;
+  width: 100%;
+  font-size: 14px;
+}
+
+/* =========================
+   Auth Page
+========================= */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: #f5f5f7;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.auth-card h1 {
+  margin: 0 0 8px;
+  font-size: 40px;
+}
+
+.auth-card p {
+  color: #666;
+  margin-bottom: 24px;
+}
+
+.auth-card label {
+  margin-bottom: 16px;
+}
+
+.auth-button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.error-text {
+  color: #c62828 !important;
+  background: #fff2f2;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin: 8px 0 12px !important;
+}
+
+/* =========================
+   Form
+========================= */
+
+.form-card {
+  background: white;
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.form-header h2 {
+  margin: 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+input,
+textarea,
+select {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 14px;
+  background: white;
+  color: #222;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #111;
+}
+
+textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.memo-field {
+  margin-top: 16px;
+}
+
+.steps-editor {
+  margin-top: 24px;
+  padding: 18px;
+  background: #fafafa;
+  border-radius: 14px;
+}
+
+.steps-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.steps-editor-header h3 {
+  margin: 0;
+}
+
+.step-editor-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 140px 70px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.step-number {
+  color: #777;
+  font-weight: bold;
+  text-align: center;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* =========================
+   Company Cards
+========================= */
 
 .company-list {
   display: flex;
@@ -131,4 +351,68 @@ body {
   background: #f8f8f8;
   padding: 14px;
   border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+.company-extra {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+  color: #444;
+  font-size: 14px;
+}
+
+.company-extra p {
+  margin: 8px 0;
+}
+
+.company-extra a {
+  color: #1565c0;
+  word-break: break-all;
+}
+
+.empty-card {
+  background: white;
+  border-radius: 18px;
+  padding: 24px;
+  color: #666;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* =========================
+   Mobile
+========================= */
+
+@media (max-width: 760px) {
+  .app {
+    padding: 28px 16px;
+  }
+
+  .auth-page {
+    padding: 20px;
+  }
+
+  .auth-card {
+    padding: 24px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-header-row {
+    flex-direction: column;
+  }
+
+  .company-header {
+    flex-direction: column;
+  }
+
+  .step-editor-row {
+    grid-template-columns: 28px 1fr;
+  }
+
+  .step-editor-row select,
+  .step-editor-row button {
+    grid-column: 2;
+  }
 }
