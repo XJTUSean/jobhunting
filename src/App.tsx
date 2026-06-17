@@ -30,6 +30,7 @@ type CompanyStatus = "active" | "waiting" | "passed" | "rejected" | "declined";
 type FlowStatus = "done" | "current" | "todo" | "failed";
 type TimeMode = "none" | "deadline" | "schedule";
 type AppPage = "companies" | "calendar" | "materials";
+type CompanyGroupKey = "todo" | "waiting" | "finished";
 
 
 type MaterialCategory =
@@ -92,6 +93,31 @@ type PersonalMaterialFile = {
   memo: string;
   createdAt?: any;
   updatedAt?: any;
+};
+
+type CalendarEventDetail = {
+  companyName: string;
+  itemTitle: string;
+  mode: "deadline" | "schedule";
+  startText: string;
+  endText: string;
+  location: string;
+  url: string;
+  memo: string;
+};
+
+type CurrentActionItem = {
+  id: string;
+  companyName: string;
+  itemTitle: string;
+  mode: "deadline" | "schedule";
+  targetTime: string;
+  endTime: string;
+  location: string;
+  url: string;
+  memo: string;
+  sortTime: number;
+  groupLabel: string;
 };
 
 type FlowItem = {
@@ -212,6 +238,22 @@ const materialCategoryOptions: {
 ];
 
 const DEFAULT_PERSONAL_MATERIAL_CATEGORY = "其他";
+
+const companyGroupDefinitions: {
+  key: CompanyGroupKey;
+  label: string;
+  description: string;
+}[] = [
+  { key: "todo", label: "待办", description: "正在进行，需要你主动处理下一件事的公司。" },
+  { key: "waiting", label: "等待结果中", description: "当前阶段已完成，正在等待结果的公司。" },
+  { key: "finished", label: "结束", description: "已经拿到 offer、落选或主动辞退的公司。" },
+];
+
+function getCompanyGroupKey(status: CompanyStatus): CompanyGroupKey {
+  if (status === "active") return "todo";
+  if (status === "waiting") return "waiting";
+  return "finished";
+}
 
 const legacyPersonalMaterialKindLabels: Record<string, string> = {
   photo: "照片 / 图片",
@@ -400,6 +442,8 @@ function getNextFlowItem(items: FlowItem[]) {
   return items[nextIndex] ?? null;
 }
 
+
+
 function applyCurrentIndex(items: FlowItem[], currentIndex: number): FlowItem[] {
   return items.map((item, index) => ({
     ...item,
@@ -410,6 +454,27 @@ function applyCurrentIndex(items: FlowItem[], currentIndex: number): FlowItem[] 
           ? ("current" as FlowStatus)
           : ("todo" as FlowStatus),
   }));
+}
+
+function createDeclinedFlowItems(
+  items: FlowItem[],
+  companyStatus: CompanyStatus,
+): FlowItem[] {
+  const currentIndex = getCurrentFlowIndex(items);
+
+  return items.map((item, index) => {
+    const isAlreadyDone = item.status === "done";
+    const isCompletedWaitingStage =
+      companyStatus === "waiting" && index === currentIndex;
+
+    return {
+      ...item,
+      status:
+        index < currentIndex || isAlreadyDone || isCompletedWaitingStage
+          ? ("done" as FlowStatus)
+          : ("todo" as FlowStatus),
+    };
+  });
 }
 
 function normalizeCompanyFlowItems(
@@ -436,6 +501,13 @@ function normalizeCompanyFlowItems(
     });
   }
 
+  if (companyStatus === "declined") {
+    return items.map((item) => ({
+      ...item,
+      status: item.status === "done" ? ("done" as FlowStatus) : ("todo" as FlowStatus),
+    }));
+  }
+
   const currentIndex = getCurrentFlowIndex(items);
   return applyCurrentIndex(items, currentIndex);
 }
@@ -450,6 +522,61 @@ function formatDateTime(value: string) {
   }
 
   return date.toLocaleString();
+}
+
+
+function getDateOnlyValue(value: string) {
+  if (!value) return "";
+
+  return value.slice(0, 10);
+}
+
+function formatTimeOnly(value: string) {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    const match = value.match(/T(\d{2}:\d{2})/);
+    return match?.[1] ?? value;
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getActionGroupLabel(sortTime: number) {
+  const now = new Date();
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const tomorrowStart = todayStart + 24 * 60 * 60 * 1000;
+  const threeDaysLater = todayStart + 4 * 24 * 60 * 60 * 1000;
+  const sevenDaysLater = todayStart + 8 * 24 * 60 * 60 * 1000;
+
+  if (sortTime < now.getTime()) return "已逾期";
+  if (sortTime < tomorrowStart) return "今天";
+  if (sortTime < threeDaysLater) return "3 天内";
+  if (sortTime < sevenDaysLater) return "7 天内";
+  return "之后";
+}
+
+function getActionItemTime(item: FlowItem) {
+  if (item.timeMode === "deadline" && item.deadline) {
+    const date = new Date(item.deadline);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (item.timeMode === "schedule" && item.start) {
+    const date = new Date(item.start);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
 }
 
 function normalizeLoadedFlowItems(data: any): FlowItem[] {
@@ -557,11 +684,12 @@ function App() {
   const [detailCompanyId, setDetailCompanyId] = useState<string | null>(null);
   const [detailItem, setDetailItem] = useState<FlowItem | null>(null);
 
-  const [visiblePasswords, setVisiblePasswords] = useState<
-    Record<string, boolean>
-  >({});
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [activeCompanyGroupKey, setActiveCompanyGroupKey] =
+    useState<CompanyGroupKey>("todo");
   const [activePage, setActivePage] = useState<AppPage>("companies");
+  const [selectedCalendarEvent, setSelectedCalendarEvent] =
+    useState<CalendarEventDetail | null>(null);
 
   const [textMaterials, setTextMaterials] = useState<TextMaterial[]>([]);
   const [textMaterialsLoading, setTextMaterialsLoading] = useState(false);
@@ -611,6 +739,46 @@ function App() {
     useState("");
   const [editingPersonalMaterialFileId, setEditingPersonalMaterialFileId] =
     useState<string | null>(null);
+  const [isPersonalMaterialFormOpen, setIsPersonalMaterialFormOpen] = useState(false);
+  const [isTextCategoryManageOpen, setIsTextCategoryManageOpen] = useState(false);
+  const [isPersonalCategoryManageOpen, setIsPersonalCategoryManageOpen] = useState(false);
+
+  useEffect(() => {
+    const hasOpenModal =
+      isFormOpen ||
+      isDetailFormOpen ||
+      isTextMaterialFormOpen ||
+      isPersonalMaterialFormOpen ||
+      isTextCategoryManageOpen ||
+      isPersonalCategoryManageOpen ||
+      selectedCalendarEvent !== null;
+
+    if (!hasOpenModal) return;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth =
+      window.innerWidth - document.documentElement.clientWidth;
+
+    document.body.style.overflow = "hidden";
+
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.paddingRight = originalPaddingRight;
+    };
+  }, [
+    isFormOpen,
+    isDetailFormOpen,
+    isTextMaterialFormOpen,
+    isPersonalMaterialFormOpen,
+    isTextCategoryManageOpen,
+    isPersonalCategoryManageOpen,
+    selectedCalendarEvent,
+  ]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1067,7 +1235,7 @@ function App() {
             return null;
           }
 
-          if (item.status === "done" || item.status === "failed") {
+          if (item.status !== "current") {
             return null;
           }
 
@@ -1076,12 +1244,15 @@ function App() {
 
             return {
               id: `${company.id}-${item.id}`,
-              title: `${company.name}｜${item.title}`,
-              start: item.deadline,
+              title: `${formatTimeOnly(item.deadline)} DDL｜${company.name}｜${item.title}`,
+              start: getDateOnlyValue(item.deadline),
+              allDay: true,
+              className: "calendar-event-deadline",
               extendedProps: {
                 companyName: company.name,
                 itemTitle: item.title,
-                timeMode: "截止时间",
+                mode: "deadline",
+                deadline: item.deadline,
                 location: item.location,
                 url: item.url,
                 memo: item.memo,
@@ -1097,10 +1268,11 @@ function App() {
               title: `${company.name}｜${item.title}`,
               start: item.start,
               end: item.end || undefined,
+              className: "calendar-event-schedule",
               extendedProps: {
                 companyName: company.name,
                 itemTitle: item.title,
-                timeMode: "开始结束时间",
+                mode: "schedule",
                 location: item.location,
                 url: item.url,
                 memo: item.memo,
@@ -1113,6 +1285,69 @@ function App() {
       )
       .filter(Boolean);
   }, [companies]);
+
+  const currentActionItems = useMemo<CurrentActionItem[]>(() => {
+    return companies
+      .flatMap((company) =>
+        company.flowItems.map((item) => {
+          if (company.status !== "active") return null;
+          if (item.status !== "current") return null;
+          if (item.timeMode !== "deadline" && item.timeMode !== "schedule") {
+            return null;
+          }
+
+          const targetDate = getActionItemTime(item);
+          if (!targetDate) return null;
+
+          return {
+            id: `${company.id}-${item.id}`,
+            companyName: company.name,
+            itemTitle: item.title,
+            mode: item.timeMode,
+            targetTime: item.timeMode === "deadline" ? item.deadline : item.start,
+            endTime: item.timeMode === "schedule" ? item.end : "",
+            location: item.location,
+            url: item.url,
+            memo: item.memo,
+            sortTime: targetDate.getTime(),
+            groupLabel: getActionGroupLabel(targetDate.getTime()),
+          };
+        }),
+      )
+      .filter((item): item is CurrentActionItem => item !== null)
+      .sort((a, b) => a.sortTime - b.sortTime);
+  }, [companies]);
+
+  const currentActionGroups = useMemo(() => {
+    const groupOrder = ["已逾期", "今天", "3 天内", "7 天内", "之后"];
+
+    return groupOrder
+      .map((label) => ({
+        label,
+        items: currentActionItems.filter((item) => item.groupLabel === label),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [currentActionItems]);
+
+  const companyGroupTabs = useMemo(() => {
+    return companyGroupDefinitions.map((group) => ({
+      ...group,
+      count: filteredCompanies.filter(
+        (company) => getCompanyGroupKey(company.status) === group.key,
+      ).length,
+    }));
+  }, [filteredCompanies]);
+
+  const companyDisplayGroups = useMemo(() => {
+    return companyGroupDefinitions
+      .filter((group) => group.key === activeCompanyGroupKey)
+      .map((group) => ({
+        ...group,
+        items: filteredCompanies.filter(
+          (company) => getCompanyGroupKey(company.status) === group.key,
+        ),
+      }));
+  }, [filteredCompanies, activeCompanyGroupKey]);
 
   const handleAuth = async () => {
     setAuthError("");
@@ -1158,7 +1393,6 @@ function App() {
     setIsDetailFormOpen(false);
     setDetailCompanyId(null);
     setDetailItem(null);
-    setVisiblePasswords({});
     setTextMaterials([]);
     setTextMaterialsLoading(false);
     setPersonalMaterialFiles([]);
@@ -1174,6 +1408,9 @@ function App() {
     setPersonalFileMemo("");
     setPersonalFileSearchKeyword("");
     setEditingPersonalMaterialFileId(null);
+    setIsPersonalMaterialFormOpen(false);
+    setIsTextCategoryManageOpen(false);
+    setIsPersonalCategoryManageOpen(false);
     setMaterialSubcategories([]);
     setMaterialSubcategoriesLoading(false);
     setActiveMaterialSubcategory("全部");
@@ -1184,6 +1421,7 @@ function App() {
     setActiveMaterialCategory(null);
     setMaterialSearchKeyword("");
     setActivePage("companies");
+    setSelectedCalendarEvent(null);
   };
 
   const updateFormField = <K extends keyof CompanyForm>(
@@ -1211,6 +1449,18 @@ function App() {
   ) => {
     setDetailItem((prev) => {
       if (!prev) return prev;
+
+      if (field === "timeMode") {
+        const nextTimeMode = value as TimeMode;
+
+        return {
+          ...prev,
+          timeMode: nextTimeMode,
+          deadline: nextTimeMode === "deadline" ? prev.deadline : "",
+          start: nextTimeMode === "schedule" ? prev.start : "",
+          end: nextTimeMode === "schedule" ? prev.end : "",
+        };
+      }
 
       return {
         ...prev,
@@ -1285,7 +1535,6 @@ function App() {
     setDetailCompanyId(null);
     setDetailItem(null);
     setIsFormOpen(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const openCurrentDetailForm = (company: Company) => {
@@ -1301,7 +1550,6 @@ function App() {
     setDetailCompanyId(company.id);
     setDetailItem({ ...currentItem });
     setIsDetailFormOpen(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const closeDetailForm = () => {
@@ -1410,9 +1658,10 @@ function App() {
         ? {
             ...item,
             timeMode: detailItem.timeMode,
-            deadline: detailItem.deadline,
-            start: detailItem.start,
-            end: detailItem.end,
+            deadline:
+              detailItem.timeMode === "deadline" ? detailItem.deadline : "",
+            start: detailItem.timeMode === "schedule" ? detailItem.start : "",
+            end: detailItem.timeMode === "schedule" ? detailItem.end : "",
             location: detailItem.location.trim(),
             url: detailItem.url.trim(),
             memo: detailItem.memo.trim(),
@@ -1559,11 +1808,26 @@ function App() {
     }
   };
 
-  const toggleCompanyPassword = (companyId: string) => {
-    setVisiblePasswords((prev) => ({
-      ...prev,
-      [companyId]: !prev[companyId],
-    }));
+
+  const declineCompany = async (company: Company) => {
+    if (!user) return;
+
+    const ok = window.confirm(
+      `确定将 ${company.name} 标记为辞退吗？`,
+    );
+    if (!ok) return;
+
+    try {
+      const companyRef = doc(db, "users", user.uid, "companies", company.id);
+      await updateDoc(companyRef, {
+        status: "declined",
+        flowItems: createDeclinedFlowItems(company.flowItems, company.status),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(error);
+      alert("标记辞退失败");
+    }
   };
 
   const updateTextMaterialFormField = <K extends keyof TextMaterialForm>(
@@ -1602,10 +1866,10 @@ function App() {
     resetTextMaterialForm(null);
   };
 
-  const createMaterialSubcategory = async () => {
+  const createMaterialSubcategoryWithName = async (rawName: string) => {
     if (!user || !activeMaterialCategory) return;
 
-    const name = normalizeSubcategoryName(newSubcategoryName);
+    const name = normalizeSubcategoryName(rawName);
 
     if (name === "其他") {
       alert("“其他”是默认分类，不需要重复新建");
@@ -1629,6 +1893,76 @@ function App() {
     } catch (error) {
       console.error(error);
       alert("新建词条分类失败");
+    }
+  };
+
+
+  const openTextCategoryManager = () => {
+    setNewSubcategoryName("");
+    setIsTextCategoryManageOpen(true);
+  };
+
+  const closeTextCategoryManager = () => {
+    setNewSubcategoryName("");
+    setIsTextCategoryManageOpen(false);
+  };
+
+  const renameMaterialSubcategory = async (oldName: string) => {
+    if (!user || !activeMaterialCategory) return;
+
+    const nextName = normalizeSubcategoryName(
+      window.prompt("请输入新的词条分类名", oldName) ?? "",
+    );
+
+    if (!nextName || nextName === oldName) return;
+
+    if (nextName === "其他") {
+      alert("不能重命名为默认分类“其他”");
+      return;
+    }
+
+    if (activeSubcategoryOptions.includes(nextName)) {
+      alert("这个分类已经存在");
+      return;
+    }
+
+    const subcategoriesToRename = materialSubcategories.filter(
+      (subcategory) =>
+        subcategory.parentCategory === activeMaterialCategory &&
+        subcategory.name === oldName,
+    );
+
+    const materialsToMove = textMaterials.filter(
+      (material) =>
+        material.category === activeMaterialCategory &&
+        normalizeSubcategoryName(material.subcategory) === oldName,
+    );
+
+    try {
+      await Promise.all([
+        ...subcategoriesToRename.map((subcategory) =>
+          updateDoc(
+            doc(db, "users", user.uid, "materialSubcategories", subcategory.id),
+            { name: nextName, updatedAt: serverTimestamp() },
+          ),
+        ),
+        ...materialsToMove.map((material) =>
+          updateDoc(doc(db, "users", user.uid, "textMaterials", material.id), {
+            subcategory: nextName,
+            updatedAt: serverTimestamp(),
+          }),
+        ),
+      ]);
+
+      if (activeMaterialSubcategory === oldName) {
+        setActiveMaterialSubcategory(nextName);
+      }
+      if (textMaterialForm.subcategory === oldName) {
+        setTextMaterialForm((prev) => ({ ...prev, subcategory: nextName }));
+      }
+    } catch (error) {
+      console.error(error);
+      alert("重命名词条分类失败");
     }
   };
 
@@ -1695,7 +2029,6 @@ function App() {
 
     resetTextMaterialForm(activeMaterialCategory);
     setIsTextMaterialFormOpen(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const openEditTextMaterialForm = (material: TextMaterial) => {
@@ -1709,7 +2042,6 @@ function App() {
     });
     setEditingTextMaterialId(material.id);
     setIsTextMaterialFormOpen(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const closeTextMaterialForm = () => {
@@ -1807,6 +2139,8 @@ function App() {
     setNewPersonalMaterialCategoryName("");
     setPersonalFileSearchKeyword("");
     resetPersonalMaterialForm();
+    setIsPersonalMaterialFormOpen(false);
+    setIsPersonalCategoryManageOpen(false);
   };
 
   const createPersonalMaterialCategory = async () => {
@@ -1894,6 +2228,71 @@ function App() {
     }
   };
 
+  const openPersonalCategoryManager = () => {
+    setNewPersonalMaterialCategoryName("");
+    setIsPersonalCategoryManageOpen(true);
+  };
+
+  const closePersonalCategoryManager = () => {
+    setNewPersonalMaterialCategoryName("");
+    setIsPersonalCategoryManageOpen(false);
+  };
+
+  const renamePersonalMaterialCategory = async (oldName: string) => {
+    if (!user) return;
+
+    const nextName = normalizePersonalMaterialKind(
+      window.prompt("请输入新的材料类别名", oldName) ?? "",
+    );
+
+    if (!nextName || nextName === oldName) return;
+
+    if (nextName === DEFAULT_PERSONAL_MATERIAL_CATEGORY) {
+      alert("不能重命名为默认类别“其他”");
+      return;
+    }
+
+    if (personalMaterialCategoryOptions.includes(nextName)) {
+      alert("这个类别已经存在");
+      return;
+    }
+
+    const categoriesToRename = personalMaterialCategories.filter(
+      (category) => normalizePersonalMaterialKind(category.name) === oldName,
+    );
+
+    const filesToMove = personalMaterialFiles.filter(
+      (file) => normalizePersonalMaterialKind(file.kind) === oldName,
+    );
+
+    try {
+      await Promise.all([
+        ...categoriesToRename.map((category) =>
+          updateDoc(
+            doc(db, "users", user.uid, "materialFileCategories", category.id),
+            { name: nextName, updatedAt: serverTimestamp() },
+          ),
+        ),
+        ...filesToMove.map((file) =>
+          updateDoc(doc(db, "users", user.uid, "materialFiles", file.id), {
+            kind: nextName,
+            updatedAt: serverTimestamp(),
+          }),
+        ),
+      ]);
+
+      if (activePersonalFileKind === oldName) {
+        setActivePersonalFileKind(nextName);
+      }
+      if (personalFileKind === oldName) {
+        setPersonalFileKind(nextName);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("重命名个人材料类别失败");
+    }
+  };
+
   const resetPersonalMaterialForm = () => {
     setPersonalFileName("");
     setPersonalFileUrl("");
@@ -1902,13 +2301,26 @@ function App() {
     setEditingPersonalMaterialFileId(null);
   };
 
+  const openAddPersonalMaterialFile = () => {
+    resetPersonalMaterialForm();
+    if (activePersonalFileKind !== "全部") {
+      setPersonalFileKind(activePersonalFileKind);
+    }
+    setIsPersonalMaterialFormOpen(true);
+  };
+
   const openEditPersonalMaterialFile = (file: PersonalMaterialFile) => {
     setPersonalFileName(file.name);
     setPersonalFileUrl(file.fileUrl);
     setPersonalFileKind(normalizePersonalMaterialKind(file.kind));
     setPersonalFileMemo(file.memo);
     setEditingPersonalMaterialFileId(file.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setIsPersonalMaterialFormOpen(true);
+  };
+
+  const closePersonalMaterialForm = () => {
+    resetPersonalMaterialForm();
+    setIsPersonalMaterialFormOpen(false);
   };
 
   const savePersonalMaterialFile = async () => {
@@ -1957,7 +2369,7 @@ function App() {
         });
       }
 
-      resetPersonalMaterialForm();
+      closePersonalMaterialForm();
     } catch (error) {
       console.error(error);
       alert("保存个人材料链接失败");
@@ -1974,7 +2386,7 @@ function App() {
       await deleteDoc(doc(db, "users", user.uid, "materialFiles", file.id));
 
       if (editingPersonalMaterialFileId === file.id) {
-        resetPersonalMaterialForm();
+        closePersonalMaterialForm();
       }
     } catch (error) {
       console.error(error);
@@ -2172,6 +2584,45 @@ function App() {
     );
   };
 
+  const copyToClipboard = async (label: string, value: string) => {
+    if (!value) return;
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      alert(`${label}已复制`);
+    } catch (error) {
+      console.error(error);
+      alert("复制失败，请手动复制");
+    }
+  };
+
+  const openActionItemDetail = (item: CurrentActionItem) => {
+    setSelectedCalendarEvent({
+      companyName: item.companyName,
+      itemTitle: item.itemTitle,
+      mode: item.mode,
+      startText: formatDateTime(item.targetTime),
+      endText: item.endTime ? formatDateTime(item.endTime) : "",
+      location: item.location,
+      url: item.url,
+      memo: item.memo,
+    });
+  };
+
   if (authLoading) {
     return <div className="auth-page">加载中...</div>;
   }
@@ -2276,7 +2727,20 @@ function App() {
 
         <button
           className={`module-tab ${activePage === "materials" ? "active" : ""}`}
-          onClick={() => setActivePage("materials")}
+          onClick={() => {
+            setActivePage("materials");
+            setActiveMaterialCategory(null);
+            setActivePersonalMaterialsFolder(false);
+            setActiveMaterialSubcategory("全部");
+            setActivePersonalFileKind("全部");
+            setNewSubcategoryName("");
+            setMaterialSearchKeyword("");
+            setPersonalFileSearchKeyword("");
+            setExpandedTextMaterialId(null);
+            setIsTextMaterialFormOpen(false);
+            setEditingTextMaterialId(null);
+            setEditingPersonalMaterialFileId(null);
+          }}
         >
           材料库
         </button>
@@ -2295,8 +2759,33 @@ function App() {
             />
           </section>
 
+          <section className="company-group-tabs" aria-label="公司状态分类">
+            {companyGroupTabs.map((group) => (
+              <button
+                key={group.key}
+                className={`company-group-tab company-group-tab-${group.key} ${
+                  activeCompanyGroupKey === group.key ? "active" : ""
+                }`}
+                onClick={() => setActiveCompanyGroupKey(group.key)}
+              >
+                <span>{group.label}</span>
+                <strong>{group.count} 社</strong>
+              </button>
+            ))}
+          </section>
+
           {isFormOpen && (
-            <section className="form-card">
+            <div
+              className="app-modal-overlay"
+              onClick={() => {
+                resetForm();
+                setIsFormOpen(false);
+              }}
+            >
+              <section
+                className="form-card app-modal-card"
+                onClick={(event) => event.stopPropagation()}
+              >
               <div className="form-header">
                 <h2>{editingCompanyId ? "编辑公司" : "添加公司"}</h2>
                 <button
@@ -2441,11 +2930,16 @@ function App() {
                   {editingCompanyId ? "更新" : "添加"}
                 </button>
               </div>
-            </section>
+              </section>
+            </div>
           )}
 
           {isDetailFormOpen && detailItem && (
-            <section className="form-card">
+            <div className="app-modal-overlay" onClick={closeDetailForm}>
+              <section
+                className="form-card app-modal-card"
+                onClick={(event) => event.stopPropagation()}
+              >
               <div className="form-header">
                 <h2>编辑当前阶段详情</h2>
                 <button className="secondary-button" onClick={closeDetailForm}>
@@ -2554,7 +3048,8 @@ function App() {
                   保存详情
                 </button>
               </div>
-            </section>
+              </section>
+            </div>
           )}
 
           <section className="company-list">
@@ -2573,10 +3068,24 @@ function App() {
               )}
 
             {!companiesLoading &&
-              filteredCompanies.map((company) => {
+              companyDisplayGroups.map((group) => (
+                <section className={`company-group company-group-${group.key}`} key={group.key}>
+                  <div className="company-group-header">
+                    <div>
+                      <h3>{group.label}</h3>
+                      <p>{group.description}</p>
+                    </div>
+                    <span className="material-folder-count">{group.items.length} 社</span>
+                  </div>
+
+                  <div className="company-group-list">
+                    {group.items.length === 0 && (
+                      <div className="empty-card">这个分类下暂时没有公司。</div>
+                    )}
+
+                    {group.items.map((company) => {
                 const currentItem = getCurrentFlowItem(company.flowItems);
                 const nextItem = getNextFlowItem(company.flowItems);
-
                 return (
                   <article className="company-card" key={company.id}>
                     <div className="company-header">
@@ -2589,9 +3098,13 @@ function App() {
                           >
                             优先度：{getPriorityLabel(company.priority)}
                           </span>
-                          <span className={`badge status-${company.status}`}>
-                            {getStatusLabel(company.status)}
-                          </span>
+                          {company.status !== "passed" &&
+                            company.status !== "rejected" &&
+                            company.status !== "declined" && (
+                              <span className={`badge status-${company.status}`}>
+                                {getStatusLabel(company.status)}
+                              </span>
+                            )}
                         </div>
                       </div>
 
@@ -2603,6 +3116,16 @@ function App() {
                           >
                             编辑公司
                           </button>
+                          {company.status !== "passed" &&
+                            company.status !== "rejected" &&
+                            company.status !== "declined" && (
+                              <button
+                                className="decline-button top-decline-button"
+                                onClick={() => declineCompany(company)}
+                              >
+                                辞退
+                              </button>
+                            )}
                           <button
                             className="danger-button"
                             onClick={() => removeCompany(company)}
@@ -2633,32 +3156,64 @@ function App() {
                       <div className="empty-card">还没有设置选考流程。</div>
                     )}
 
-                    {currentItem && (
-                      <div className="current-flow-card">
+                    {company.status === "passed" && (
+                      <div className="finished-result-card finished-result-success finished-result-success-only">
+                        <div className="finished-result-content">
+                          <span className="finished-result-label">成功 / 内定</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {company.status === "rejected" && (
+                      <div className="finished-result-card finished-result-rejected finished-result-success-only">
+                        <div className="finished-result-content">
+                          <span className="finished-result-label">落选</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {company.status === "declined" && (
+                      <div className="finished-result-card finished-result-declined finished-result-success-only">
+                        <div className="finished-result-content">
+                          <span className="finished-result-label">辞退</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {currentItem &&
+                      company.status !== "passed" &&
+                      company.status !== "rejected" &&
+                      company.status !== "declined" && (
+                      <div
+                        className={`current-flow-card ${
+                          company.status === "waiting" ? "waiting-result-card" : ""
+                        }`}
+                      >
                         {company.status === "waiting" ? (
                           <>
-                            <div className="stage-status-row">
-                              <span className="stage-label-inline">已完成</span>
-                              <span className="stage-pill done-pill">
+                            <div className="waiting-result-label">
+                              等待结果中
+                            </div>
+
+                            <div className="stage-status-row waiting-stage-row">
+                              <span className="stage-pill waiting-pill">
                                 {currentItem.title}
                               </span>
                             </div>
 
-                            <div className="stage-status-row">
-                              <span className="stage-label-inline">
-                                是否顺利进入
-                              </span>
-                              <span className="stage-pill next-pill">
-                                {nextItem ? nextItem.title : "最终结果"}
-                              </span>
-                            </div>
+                            <p className="waiting-result-note">
+                              正在等待「{currentItem.title}」的结果
+                              {nextItem
+                                ? `，通过后进入「${nextItem.title}」。`
+                                : "，通过后流程结束。"}
+                            </p>
 
-                            <div className="task-result-actions">
+                            <div className="task-result-actions waiting-result-actions">
                               <button
                                 className="success-button"
                                 onClick={() => passCurrentFlowItem(company)}
                               >
-                                成功
+                                通过
                               </button>
                               <button
                                 className="danger-button"
@@ -2765,28 +3320,6 @@ function App() {
                       </div>
                     )}
 
-                    {company.status === "passed" && (
-                      <div className="current-flow-card">
-                        <div className="stage-status-row">
-                          <span className="stage-label-inline">
-                            全部流程已完成
-                          </span>
-                          <span className="stage-pill done-pill">
-                            通过 / 内定
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {company.status === "rejected" && (
-                      <div className="current-flow-card">
-                        <div className="stage-status-row">
-                          <span className="stage-label-inline">结果</span>
-                          <span className="stage-pill failed-pill">落选</span>
-                        </div>
-                      </div>
-                    )}
-
                     <div className="company-extra">
                       {company.myPageUrl && (
                         <p>
@@ -2802,25 +3335,31 @@ function App() {
                       )}
 
                       {company.loginId && (
-                        <p>
+                        <p className="credential-row">
                           <strong>登录 ID：</strong>
-                          {company.loginId}
+                          <span>{company.loginId}</span>
+                          <button
+                            className="mini-button copy-button"
+                            onClick={() =>
+                              copyToClipboard("登录 ID", company.loginId ?? "")
+                            }
+                          >
+                            复制
+                          </button>
                         </p>
                       )}
 
                       {company.loginPassword && (
-                        <p className="password-row">
+                        <p className="credential-row">
                           <strong>密码：</strong>
-                          <span>
-                            {visiblePasswords[company.id]
-                              ? company.loginPassword
-                              : "••••••••••••"}
-                          </span>
+                          <span>{company.loginPassword}</span>
                           <button
-                            className="mini-button"
-                            onClick={() => toggleCompanyPassword(company.id)}
+                            className="mini-button copy-button"
+                            onClick={() =>
+                              copyToClipboard("密码", company.loginPassword ?? "")
+                            }
                           >
-                            {visiblePasswords[company.id] ? "隐藏" : "显示"}
+                            复制
                           </button>
                         </p>
                       )}
@@ -2834,7 +3373,10 @@ function App() {
                     </div>
                   </article>
                 );
-              })}
+                    })}
+                  </div>
+                </section>
+              ))}
           </section>
         </>
       )}
@@ -2843,8 +3385,155 @@ function App() {
         <section className="calendar-section">
           <div className="calendar-header">
             <h2>日历</h2>
-            <p>流程节点中设置了时间的未完成事项会自动显示在这里。</p>
+            <p>只显示每家公司当前阶段中需要主动处理的下一件事项。</p>
           </div>
+
+          <div className="calendar-card action-list-card">
+            <div className="action-list-header">
+              <div>
+                <h3>当前待办事项</h3>
+                <p>按时间排序，只包含进行中公司的当前阶段。</p>
+              </div>
+              <span className="material-folder-count">
+                {currentActionItems.length} 件
+              </span>
+            </div>
+
+            {currentActionGroups.length === 0 ? (
+              <div className="empty-card compact-empty-card">
+                当前没有设置时间的待办事项。
+              </div>
+            ) : (
+              <div className="action-group-list">
+                {currentActionGroups.map((group) => (
+                  <div className="action-group" key={group.label}>
+                    <h4>{group.label}</h4>
+                    <div className="action-item-list">
+                      {group.items.map((item) => (
+                        <article
+                          className={
+                            item.groupLabel === "已逾期"
+                              ? "action-item overdue"
+                              : "action-item"
+                          }
+                          key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openActionItemDetail(item)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openActionItemDetail(item);
+                            }
+                          }}
+                        >
+                          <div>
+                            <strong>{item.companyName}</strong>
+                            <p>{item.itemTitle}</p>
+                          </div>
+                          <div className="action-item-meta">
+                            <span
+                              className={
+                                item.mode === "deadline"
+                                  ? "badge event-type-badge deadline-badge"
+                                  : "badge event-type-badge schedule-badge"
+                              }
+                            >
+                              {item.mode === "deadline" ? "DDL" : "日程"}
+                            </span>
+                            <span>{formatDateTime(item.targetTime)}</span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {selectedCalendarEvent && (
+            <div
+              className="calendar-detail-overlay"
+              onClick={() => setSelectedCalendarEvent(null)}
+            >
+              <div
+                className="calendar-detail-modal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="calendar-detail-header">
+                  <div>
+                    <span
+                      className={
+                        selectedCalendarEvent.mode === "deadline"
+                          ? "badge event-type-badge deadline-badge"
+                          : "badge event-type-badge schedule-badge"
+                      }
+                    >
+                      {selectedCalendarEvent.mode === "deadline"
+                        ? "截止时间"
+                        : "开始结束时间"}
+                    </span>
+                    <h3>{selectedCalendarEvent.itemTitle}</h3>
+                    <p>{selectedCalendarEvent.companyName}</p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    onClick={() => setSelectedCalendarEvent(null)}
+                  >
+                    关闭
+                  </button>
+                </div>
+
+                <div className="calendar-detail-body">
+                  {selectedCalendarEvent.mode === "deadline" ? (
+                    <p>
+                      <strong>截止时间：</strong>
+                      {selectedCalendarEvent.startText}
+                    </p>
+                  ) : (
+                    <>
+                      <p>
+                        <strong>开始时间：</strong>
+                        {selectedCalendarEvent.startText}
+                      </p>
+                      <p>
+                        <strong>结束时间：</strong>
+                        {selectedCalendarEvent.endText || "未设置"}
+                      </p>
+                    </>
+                  )}
+
+                  {selectedCalendarEvent.location && (
+                    <p>
+                      <strong>地点：</strong>
+                      {selectedCalendarEvent.location}
+                    </p>
+                  )}
+
+                  {selectedCalendarEvent.url && (
+                    <p>
+                      <strong>URL：</strong>
+                      <a
+                        href={selectedCalendarEvent.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {selectedCalendarEvent.url}
+                      </a>
+                    </p>
+                  )}
+
+                  {selectedCalendarEvent.memo && (
+                    <p>
+                      <strong>备注：</strong>
+                      {selectedCalendarEvent.memo}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="calendar-card">
             <FullCalendar
@@ -2866,22 +3555,31 @@ function App() {
                 day: "日",
               }}
               eventClick={(info) => {
-                const props = info.event.extendedProps;
+                const props = info.event.extendedProps as {
+                  companyName?: string;
+                  itemTitle?: string;
+                  mode?: "deadline" | "schedule";
+                  deadline?: string;
+                  location?: string;
+                  url?: string;
+                  memo?: string;
+                };
 
-                alert(
-                  [
-                    `公司：${props.companyName}`,
-                    `事项：${props.itemTitle}`,
-                    `时间形式：${props.timeMode}`,
-                    `开始：${info.event.start?.toLocaleString() ?? ""}`,
-                    `结束：${info.event.end?.toLocaleString() ?? "未设置"}`,
-                    props.location ? `地点：${props.location}` : "",
-                    props.url ? `URL：${props.url}` : "",
-                    props.memo ? `备注：${props.memo}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join("\n"),
-                );
+                const mode = props.mode ?? "schedule";
+
+                setSelectedCalendarEvent({
+                  companyName: props.companyName ?? "",
+                  itemTitle: props.itemTitle ?? "",
+                  mode,
+                  startText:
+                    mode === "deadline"
+                      ? formatDateTime(props.deadline ?? "")
+                      : info.event.start?.toLocaleString() ?? "",
+                  endText: info.event.end?.toLocaleString() ?? "",
+                  location: props.location ?? "",
+                  url: props.url ?? "",
+                  memo: props.memo ?? "",
+                });
               }}
             />
           </div>
@@ -2948,139 +3646,197 @@ function App() {
                   </h2>
                   <p>登记 Google Drive、Dropbox、OneDrive 等网盘链接。文件本体放在网盘里，JobFlow 只保存名称、类别、链接和备注。</p>
                 </div>
-              </div>
 
-              <section className="subcategory-panel personal-material-category-panel">
-                <div className="subcategory-panel-header">
-                  <div>
-                    <h3>材料类别</h3>
-                    <p>默认类别是「其他」。你可以自己新建类别，删除类别时其中的材料会移动到「其他」。</p>
-                  </div>
-                  {personalMaterialCategoriesLoading && <span>类别读取中...</span>}
-                </div>
-
-                <div className="subcategory-tabs">
-                  <button
-                    type="button"
-                    className={`subcategory-tab ${
-                      activePersonalFileKind === "全部" ? "active" : ""
-                    }`}
-                    onClick={() => setActivePersonalFileKind("全部")}
-                  >
-                    全部
-                    <span>{personalMaterialFiles.length}</span>
-                  </button>
-
-                  {personalMaterialCategoryOptions.map((name) => (
-                    <div className="subcategory-tab-wrap" key={name}>
-                      <button
-                        type="button"
-                        className={`subcategory-tab ${
-                          activePersonalFileKind === name ? "active" : ""
-                        }`}
-                        onClick={() => setActivePersonalFileKind(name)}
-                      >
-                        {name}
-                        <span>{personalMaterialCategoryCounts[name] ?? 0}</span>
-                      </button>
-                      {name !== DEFAULT_PERSONAL_MATERIAL_CATEGORY && (
-                        <button
-                          type="button"
-                          className="subcategory-delete-button"
-                          onClick={() => deletePersonalMaterialCategory(name)}
-                          title="删除类别"
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="subcategory-create-row">
-                  <input
-                    value={newPersonalMaterialCategoryName}
-                    onChange={(event) =>
-                      setNewPersonalMaterialCategoryName(event.target.value)
-                    }
-                    placeholder="新建材料类别，例：履历书、证明书、证件照"
-                  />
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={createPersonalMaterialCategory}
-                  >
-                    ＋新建类别
-                  </button>
-                </div>
-              </section>
-
-              <article className="materials-card personal-materials-panel">
-                <div className="personal-upload-box">
-                  <label>
-                    材料名称
-                    <input
-                      value={personalFileName}
-                      onChange={(event) => setPersonalFileName(event.target.value)}
-                      placeholder="例：履历书最终版 / 在学证明书 / 证件照"
-                    />
-                  </label>
-
-                  <label>
-                    材料链接
-                    <input
-                      value={personalFileUrl}
-                      onChange={(event) => setPersonalFileUrl(event.target.value)}
-                      placeholder="https://drive.google.com/..."
-                    />
-                  </label>
-
-                  <label>
-                    材料类别
-                    <select
-                      value={personalFileKind}
-                      onChange={(event) =>
-                        setPersonalFileKind(event.target.value)
-                      }
-                    >
-                      {personalMaterialCategoryOptions.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="personal-upload-memo">
-                    备注，可选
-                    <input
-                      value={personalFileMemo}
-                      onChange={(event) =>
-                        setPersonalFileMemo(event.target.value)
-                      }
-                      placeholder="例：Google Drive 共享权限已设置 / 2026年6月版"
-                    />
-                  </label>
-
+                <div className="material-header-actions">
                   <button
                     className="primary-button"
                     type="button"
-                    onClick={savePersonalMaterialFile}
+                    onClick={openAddPersonalMaterialFile}
                   >
-                    {editingPersonalMaterialFileId ? "更新链接" : "保存链接"}
+                    ＋添加个人材料
+                  </button>
+                </div>
+              </div>
+
+              <section className="subcategory-panel compact-subcategory-panel personal-material-category-panel">
+                <div className="compact-subcategory-row">
+                  {personalMaterialCategoryOptions.map((name) => (
+                    <button
+                      type="button"
+                      className={`subcategory-tab compact-subcategory-tab ${
+                        activePersonalFileKind === name ? "active" : ""
+                      }`}
+                      key={name}
+                      onClick={() =>
+                        setActivePersonalFileKind((prev) =>
+                          prev === name ? "全部" : name,
+                        )
+                      }
+                    >
+                      {name}
+                      <span>{personalMaterialCategoryCounts[name] ?? 0}</span>
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    className="secondary-button category-manage-button"
+                    onClick={openPersonalCategoryManager}
+                  >
+                    材料类别管理
                   </button>
 
-                  {editingPersonalMaterialFileId && (
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={resetPersonalMaterialForm}
-                    >
-                      取消编辑
-                    </button>
+                  {personalMaterialCategoriesLoading && (
+                    <span className="subcategory-loading-text">类别读取中...</span>
                   )}
                 </div>
+              </section>
 
+              {isPersonalMaterialFormOpen && (
+                <div className="app-modal-overlay" onClick={closePersonalMaterialForm}>
+                  <section
+                    className="form-card app-modal-card"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="form-header">
+                      <h2>{editingPersonalMaterialFileId ? "编辑个人材料" : "添加个人材料"}</h2>
+                      <button className="secondary-button" onClick={closePersonalMaterialForm}>
+                        关闭
+                      </button>
+                    </div>
+
+                    <div className="form-grid">
+                      <label>
+                        材料名称
+                        <input
+                          value={personalFileName}
+                          onChange={(event) => setPersonalFileName(event.target.value)}
+                          placeholder="例：履历书最终版 / 在学证明书 / 证件照"
+                        />
+                      </label>
+
+                      <label>
+                        材料链接
+                        <input
+                          value={personalFileUrl}
+                          onChange={(event) => setPersonalFileUrl(event.target.value)}
+                          placeholder="https://drive.google.com/..."
+                        />
+                      </label>
+
+                      <label>
+                        材料类别
+                        <select
+                          value={personalFileKind}
+                          onChange={(event) =>
+                            setPersonalFileKind(event.target.value)
+                          }
+                        >
+                          {personalMaterialCategoryOptions.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <label className="memo-field">
+                      备注，可选
+                      <textarea
+                        value={personalFileMemo}
+                        onChange={(event) =>
+                          setPersonalFileMemo(event.target.value)
+                        }
+                        placeholder="例：Google Drive 共享权限已设置 / 2026年6月版"
+                      />
+                    </label>
+
+                    <p className="form-hint">
+                      提示：Google Drive 文件需要自行设置共享权限。建议使用“知道链接的人可查看”，否则打开链接时可能没有权限。
+                    </p>
+
+                    <div className="form-actions">
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={savePersonalMaterialFile}
+                      >
+                        {editingPersonalMaterialFileId ? "更新" : "保存"}
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {isPersonalCategoryManageOpen && (
+                <div className="app-modal-overlay" onClick={closePersonalCategoryManager}>
+                  <section
+                    className="form-card app-modal-card category-manager-modal"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="form-header">
+                      <div>
+                        <h2>材料类别管理</h2>
+                        <p className="form-hint">可以新建、重命名、删除个人材料类别。删除类别时，其中材料会移动到「其他」。</p>
+                      </div>
+                      <button className="secondary-button" onClick={closePersonalCategoryManager}>
+                        关闭
+                      </button>
+                    </div>
+
+                    <div className="category-create-box">
+                      <input
+                        value={newPersonalMaterialCategoryName}
+                        onChange={(event) =>
+                          setNewPersonalMaterialCategoryName(event.target.value)
+                        }
+                        placeholder="新建材料类别，例：履历书、证明书、证件照"
+                      />
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={createPersonalMaterialCategory}
+                      >
+                        新建类别
+                      </button>
+                    </div>
+
+                    <div className="category-manager-list">
+                      {personalMaterialCategoryOptions.map((name) => (
+                        <div className="category-manager-row" key={name}>
+                          <div>
+                            <strong>{name}</strong>
+                            <span>{personalMaterialCategoryCounts[name] ?? 0} 条</span>
+                          </div>
+                          {name === DEFAULT_PERSONAL_MATERIAL_CATEGORY ? (
+                            <span className="category-fixed-label">默认类别</span>
+                          ) : (
+                            <div className="category-manager-actions">
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={() => renamePersonalMaterialCategory(name)}
+                              >
+                                重命名
+                              </button>
+                              <button
+                                className="danger-button"
+                                type="button"
+                                onClick={() => deletePersonalMaterialCategory(name)}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              <article className="materials-card personal-materials-panel">
                 <p className="selected-file-preview">
                   提示：Google Drive 文件需要自行设置共享权限。建议使用“知道链接的人可查看”，否则打开链接时可能没有权限。
                 </p>
@@ -3212,72 +3968,111 @@ function App() {
                 </div>
               </div>
 
-              <section className="subcategory-panel">
-                <div className="subcategory-panel-header">
-                  <div>
-                    <h3>词条分类</h3>
-                    <p>每个词条都必须选择一个类。默认类是「其他」，你也可以自己新建类。</p>
-                  </div>
-                  {materialSubcategoriesLoading && <span>分类读取中...</span>}
-                </div>
-
-                <div className="subcategory-tabs">
-                  <button
-                    type="button"
-                    className={`subcategory-tab ${
-                      activeMaterialSubcategory === "全部" ? "active" : ""
-                    }`}
-                    onClick={() => setActiveMaterialSubcategory("全部")}
-                  >
-                    全部
-                    <span>{materialCategoryCounts[activeMaterialCategory] ?? 0}</span>
-                  </button>
-
+              <section className="subcategory-panel compact-subcategory-panel">
+                <div className="compact-subcategory-row">
                   {activeSubcategoryOptions.map((name) => (
-                    <div className="subcategory-tab-wrap" key={name}>
-                      <button
-                        type="button"
-                        className={`subcategory-tab ${
-                          activeMaterialSubcategory === name ? "active" : ""
-                        }`}
-                        onClick={() => setActiveMaterialSubcategory(name)}
-                      >
-                        {name}
-                        <span>{activeSubcategoryCounts[name] ?? 0}</span>
-                      </button>
-
-                      {name !== "其他" && (
-                        <button
-                          type="button"
-                          className="subcategory-delete-button"
-                          onClick={() => deleteMaterialSubcategory(name)}
-                          title="删除这个类，里面的词条会移动到其他"
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      className={`subcategory-tab compact-subcategory-tab ${
+                        activeMaterialSubcategory === name ? "active" : ""
+                      }`}
+                      key={name}
+                      onClick={() =>
+                        setActiveMaterialSubcategory((prev) =>
+                          prev === name ? "全部" : name,
+                        )
+                      }
+                    >
+                      {name}
+                      <span>{activeSubcategoryCounts[name] ?? 0}</span>
+                    </button>
                   ))}
-                </div>
 
-                <div className="subcategory-create-row">
-                  <input
-                    value={newSubcategoryName}
-                    onChange={(event) => setNewSubcategoryName(event.target.value)}
-                    placeholder="新建类，例：通用 / 公司别 / 300字 / 一分钟 / 最终版"
-                  />
                   <button
-                    className="secondary-button"
                     type="button"
-                    onClick={createMaterialSubcategory}
+                    className="secondary-button category-manage-button"
+                    onClick={openTextCategoryManager}
                   >
-                    新建类
+                    词条分类管理
                   </button>
+
+                  {materialSubcategoriesLoading && (
+                    <span className="subcategory-loading-text">分类读取中...</span>
+                  )}
                 </div>
               </section>
 
+              {isTextCategoryManageOpen && (
+                <div className="app-modal-overlay" onClick={closeTextCategoryManager}>
+                  <section
+                    className="form-card app-modal-card category-manager-modal"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="form-header">
+                      <div>
+                        <h2>词条分类管理</h2>
+                        <p className="form-hint">可以新建、重命名、删除当前文件夹里的词条分类。删除分类时，其中词条会移动到「其他」。</p>
+                      </div>
+                      <button className="secondary-button" onClick={closeTextCategoryManager}>
+                        关闭
+                      </button>
+                    </div>
+
+                    <div className="category-create-box">
+                      <input
+                        value={newSubcategoryName}
+                        onChange={(event) => setNewSubcategoryName(event.target.value)}
+                        placeholder="新建词条分类，例：通用 / 公司别 / 300字 / 最终版"
+                      />
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => createMaterialSubcategoryWithName(newSubcategoryName)}
+                      >
+                        新建分类
+                      </button>
+                    </div>
+
+                    <div className="category-manager-list">
+                      {activeSubcategoryOptions.map((name) => (
+                        <div className="category-manager-row" key={name}>
+                          <div>
+                            <strong>{name}</strong>
+                            <span>{activeSubcategoryCounts[name] ?? 0} 条</span>
+                          </div>
+                          {name === "其他" ? (
+                            <span className="category-fixed-label">默认分类</span>
+                          ) : (
+                            <div className="category-manager-actions">
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={() => renameMaterialSubcategory(name)}
+                              >
+                                重命名
+                              </button>
+                              <button
+                                className="danger-button"
+                                type="button"
+                                onClick={() => deleteMaterialSubcategory(name)}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              )}
+
               {isTextMaterialFormOpen && (
-                <section className="form-card">
+                <div className="app-modal-overlay" onClick={closeTextMaterialForm}>
+                  <section
+                    className="form-card app-modal-card"
+                    onClick={(event) => event.stopPropagation()}
+                  >
                   <div className="form-header">
                     <h2>{editingTextMaterialId ? "编辑词条" : "添加词条"}</h2>
                     <button className="secondary-button" onClick={closeTextMaterialForm}>
@@ -3361,7 +4156,8 @@ function App() {
                       {editingTextMaterialId ? "更新" : "保存"}
                     </button>
                   </div>
-                </section>
+                  </section>
+                </div>
               )}
 
               <section className="text-materials-section">
