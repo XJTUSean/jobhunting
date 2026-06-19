@@ -289,10 +289,21 @@ a {
 }
 
 .toolbar-row {
+  position: relative;
   display: flex;
   justify-content: center;
-  gap: 12px;
   align-items: center;
+}
+
+.toolbar-row .search-input {
+  width: 520px;
+  max-width: 520px;
+  flex: none;
+}
+
+.toolbar-row button {
+  position: absolute;
+  right: 0;
 }
 
 .search-input {
@@ -4034,5 +4045,430 @@ label {
   *::after {
     transition: none !important;
     animation: none !important;
+  }
+}
+
+/* ===== Data backup management ===== */
+.backup-page {
+  display: grid;
+  gap: 18px;
+}
+
+.backup-card {
+  position: relative;
+  display: grid;
+  gap: 28px;
+  padding: 34px 32px 36px;
+  border: 1px solid rgba(229, 231, 235, 0.95);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 18% 14%, rgba(21, 101, 192, 0.08), transparent 32%),
+    rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  overflow: hidden;
+}
+
+.backup-card-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  justify-items: center;
+  width: 100%;
+  min-height: 96px;
+  margin: 0;
+  text-align: center;
+}
+
+.backup-card-icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  background: var(--blue-bg);
+  border: 1px solid var(--blue-border);
+  font-size: 30px;
+  margin: 0;
+}
+
+.backup-card-main > div {
+  position: absolute;
+  left: 50%;
+  top: 20px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 180px);
+  text-align: center;
+}
+
+.backup-card h3 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.backup-card p {
+  margin: 8px 0 0;
+  color: var(--subtext);
+  line-height: 1.7;
+  text-align: center;
+}
+
+.backup-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.backup-summary-grid span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.backup-card .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 260px;
+  justify-self: center;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .backup-card {
+    padding: 26px 18px 28px;
+  }
+
+  .backup-card-main {
+    min-height: 150px;
+  }
+
+  .backup-card-icon {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .backup-card-main > div {
+    top: 88px;
+    max-width: 100%;
+  }
+
+  .backup-card h3 {
+    font-size: 24px;
+    white-space: normal;
+  }
+
+  .backup-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-card .primary-button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* ===== True center action list text ===== */
+.action-list-header {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.action-list-header > div:first-child {
+  width: 100%;
+  text-align: center;
+}
+
+.action-list-header h3,
+.action-list-header p {
+  text-align: center;
+}
+
+.action-list-header > span,
+.action-list-header .badge,
+.action-list-header .action-count-badge {
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.action-group h4 {
+  text-align: center;
+}
+
+.action-item {
+  position: relative;
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+  min-height: 90px;
+  padding: 18px 220px;
+  text-align: center;
+}
+
+.action-item > div:first-child {
+  width: 100%;
+  text-align: center;
+}
+
+.action-item strong,
+.action-item p {
+  text-align: center;
+}
+
+.action-item-meta {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .action-item {
+    padding: 18px;
+    flex-direction: column;
+  }
+
+  .action-item-meta {
+    position: static;
+    transform: none;
+    justify-content: center;
+    margin-top: 10px;
+    white-space: normal;
+  }
+
+  .action-list-header > span,
+  .action-list-header .badge,
+  .action-list-header .action-count-badge {
+    position: static;
+    margin-top: 10px;
+  }
+}
+
+/* ===== Material detail header final layout fix =====
+   1) Move the back button upward near the module navigation height.
+   2) Keep material title and description truly left-aligned.
+   3) Keep PDF/export actions on the right side of the header card.
+*/
+.materials-header.materials-header-row:has(.back-folder-button) {
+  position: relative !important;
+  overflow: visible !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 28px !important;
+  padding: 72px 34px 54px !important;
+  text-align: left !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) > div:first-child {
+  width: 100% !important;
+  min-width: 0 !important;
+  text-align: left !important;
+  justify-self: stretch !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) h2 {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 14px !important;
+  width: 100% !important;
+  margin: 0 !important;
+  text-align: left !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) p {
+  width: 100% !important;
+  margin: 10px 0 0 !important;
+  text-align: left !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) .folder-title-icon {
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  text-align: left !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) .material-header-actions {
+  justify-self: end !important;
+  align-self: center !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 14px !important;
+  flex-wrap: wrap !important;
+  text-align: right !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) .back-folder-button {
+  position: absolute !important;
+  left: 0 !important;
+  top: -116px !important;
+  z-index: 5 !important;
+  width: fit-content !important;
+  margin: 0 !important;
+  padding: 12px 20px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid var(--blue-border) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: var(--blue-text) !important;
+  box-shadow: var(--shadow-sm) !important;
+  font-size: 15px !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+}
+
+.materials-header.materials-header-row:has(.back-folder-button) .back-folder-button:hover {
+  background: var(--blue-bg) !important;
+  transform: translateX(-2px) !important;
+}
+
+@media (max-width: 900px) {
+  .materials-header.materials-header-row:has(.back-folder-button) {
+    grid-template-columns: 1fr !important;
+    padding: 62px 24px 34px !important;
+  }
+
+  .materials-header.materials-header-row:has(.back-folder-button) .material-header-actions {
+    justify-self: stretch !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .materials-header.materials-header-row:has(.back-folder-button) {
+    padding: 54px 18px 28px !important;
+  }
+
+  .materials-header.materials-header-row:has(.back-folder-button) .back-folder-button {
+    position: static !important;
+    margin: 0 0 22px !important;
+    transform: none !important;
+  }
+
+  .materials-header.materials-header-row:has(.back-folder-button) .back-folder-button:hover {
+    transform: none !important;
+  }
+
+  .materials-header.materials-header-row:has(.back-folder-button) h2,
+  .materials-header.materials-header-row:has(.back-folder-button) p {
+    text-align: left !important;
+  }
+
+  .materials-header.materials-header-row:has(.back-folder-button) .material-header-actions button {
+    width: 100% !important;
+  }
+}
+
+/* ===== Module-level back button: same height as top module nav ===== */
+.module-nav-shell {
+  position: relative;
+  width: 100%;
+  margin: 22px auto 22px;
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.module-nav-shell .module-nav {
+  margin: 0 auto !important;
+}
+
+.module-back-button {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  padding: 0 22px;
+  border: 1px solid var(--blue-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--blue-text);
+  box-shadow: var(--shadow-sm);
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.module-back-button:hover {
+  background: var(--blue-bg);
+  transform: translateY(-50%) translateX(-2px);
+}
+
+.materials-header.materials-header-row:has(.material-header-actions) {
+  align-items: center !important;
+}
+
+.materials-header.materials-header-row:has(.material-header-actions) > div:first-child {
+  width: auto !important;
+  min-width: 0 !important;
+  text-align: left !important;
+}
+
+.materials-header.materials-header-row:has(.material-header-actions) h2,
+.materials-header.materials-header-row:has(.material-header-actions) p {
+  text-align: left !important;
+}
+
+.materials-header.materials-header-row:has(.material-header-actions) .folder-title-icon {
+  margin-right: 10px;
+}
+
+@media (max-width: 760px) {
+  .module-nav-shell {
+    display: grid;
+    gap: 12px;
+    min-height: auto;
+    margin: 16px auto 18px;
+  }
+
+  .module-back-button {
+    position: static;
+    transform: none;
+    width: fit-content;
+    justify-self: start;
+    min-height: 48px;
+  }
+
+  .module-back-button:hover {
+    transform: translateX(-2px);
   }
 }

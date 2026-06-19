@@ -29,7 +29,7 @@ type Priority = "high" | "middle" | "low";
 type CompanyStatus = "active" | "waiting" | "passed" | "rejected" | "declined";
 type FlowStatus = "done" | "current" | "todo" | "failed";
 type TimeMode = "none" | "deadline" | "schedule";
-type AppPage = "companies" | "calendar" | "materials";
+type AppPage = "companies" | "calendar" | "materials" | "backup";
 type CompanyGroupKey = "todo" | "waiting" | "finished";
 
 
@@ -224,7 +224,7 @@ const materialCategoryOptions: {
   icon: string;
 }[] = [
   { value: "self_analysis", label: "自我分析", description: "性格、价值观、强项弱项、经验整理", icon: "🧭" },
-  { value: "interview_questions", label: "面试问题集", description: "把面试问题作为标题，正文保存回答稿", icon: "💬" },
+  { value: "interview_questions", label: "面试问题集", description: "面试问题集与回答", icon: "💬" },
   { value: "es", label: "ES", description: "ES 答案、志望动机、公司别提交稿", icon: "📝" },
   { value: "company_research", label: "企业研究表", description: "企业业务、强项、竞合、志望理由素材", icon: "🏢" },
   { value: "job_type_research", label: "职种研究表", description: "生产技术、开发、SE 等职种理解", icon: "🧪" },
@@ -742,6 +742,149 @@ function App() {
   const [isPersonalMaterialFormOpen, setIsPersonalMaterialFormOpen] = useState(false);
   const [isTextCategoryManageOpen, setIsTextCategoryManageOpen] = useState(false);
   const [isPersonalCategoryManageOpen, setIsPersonalCategoryManageOpen] = useState(false);
+
+  const isKnownMaterialCategory = (value: string): value is MaterialCategory => {
+    return materialCategoryOptions.some((category) => category.value === value);
+  };
+
+  const resetMaterialViewState = () => {
+    setActiveMaterialCategory(null);
+    setActivePersonalMaterialsFolder(false);
+    setActiveMaterialSubcategory("全部");
+    setActivePersonalFileKind("全部");
+    setNewSubcategoryName("");
+    setMaterialSearchKeyword("");
+    setPersonalFileSearchKeyword("");
+    setExpandedTextMaterialId(null);
+    setIsTextMaterialFormOpen(false);
+    setEditingTextMaterialId(null);
+    setEditingPersonalMaterialFileId(null);
+  };
+
+  const applyRouteFromHash = (hashValue: string) => {
+    const route = hashValue.replace(/^#/, "");
+    const [page, detail] = route.split("/");
+
+    setSelectedCalendarEvent(null);
+
+    if (page === "calendar") {
+      setActivePage("calendar");
+      setIsFormOpen(false);
+      setIsDetailFormOpen(false);
+      return;
+    }
+
+    if (page === "backup") {
+      setActivePage("backup");
+      setIsFormOpen(false);
+      setIsDetailFormOpen(false);
+      resetMaterialViewState();
+      return;
+    }
+
+    if (page === "materials") {
+      setActivePage("materials");
+      setIsFormOpen(false);
+      setIsDetailFormOpen(false);
+
+      if (detail === "personal") {
+        setActivePersonalMaterialsFolder(true);
+        setActiveMaterialCategory(null);
+        setActivePersonalFileKind("全部");
+        setActiveMaterialSubcategory("全部");
+        setMaterialSearchKeyword("");
+        setExpandedTextMaterialId(null);
+        return;
+      }
+
+      if (detail && isKnownMaterialCategory(detail)) {
+        setActivePersonalMaterialsFolder(false);
+        setActiveMaterialCategory(detail);
+        setActiveMaterialSubcategory("全部");
+        setNewSubcategoryName("");
+        setMaterialSearchKeyword("");
+        setExpandedTextMaterialId(null);
+        setIsTextMaterialFormOpen(false);
+        setEditingTextMaterialId(null);
+        setTextMaterialForm(createEmptyTextMaterialForm(detail));
+        return;
+      }
+
+      resetMaterialViewState();
+      return;
+    }
+
+    setActivePage("companies");
+    setActivePersonalMaterialsFolder(false);
+    setActiveMaterialCategory(null);
+    setIsTextMaterialFormOpen(false);
+    setIsPersonalMaterialFormOpen(false);
+    setIsFormOpen(false);
+    setIsDetailFormOpen(false);
+
+    if (detail === "waiting" || detail === "finished" || detail === "todo") {
+      setActiveCompanyGroupKey(detail);
+    } else {
+      setActiveCompanyGroupKey("todo");
+    }
+  };
+
+  const navigateToRoute = (route: string) => {
+    const nextHash = route.startsWith("#") ? route : `#${route}`;
+
+    if (window.location.hash === nextHash) {
+      applyRouteFromHash(nextHash);
+      return;
+    }
+
+    window.location.hash = nextHash;
+  };
+
+  const handleExportBackup = () => {
+    const backup = {
+      app: "JobFlow",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      user: {
+        uid: user?.uid ?? "",
+        email: user?.email ?? "",
+      },
+      companies,
+      textMaterials,
+      materialSubcategories,
+      personalMaterialFiles,
+      personalMaterialCategories,
+    };
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+
+    link.href = url;
+    link.download = `jobflow-backup-${date}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (!window.location.hash) {
+      window.history.replaceState(null, "", "#companies");
+    }
+
+    const handleHashChange = () => {
+      applyRouteFromHash(window.location.hash || "#companies");
+    };
+
+    handleHashChange();
+    window.addEventListener("hashchange", handleHashChange);
+
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   useEffect(() => {
     const hasOpenModal =
@@ -1422,6 +1565,7 @@ function App() {
     setMaterialSearchKeyword("");
     setActivePage("companies");
     setSelectedCalendarEvent(null);
+    window.history.replaceState(null, "", "#companies");
   };
 
   const updateFormField = <K extends keyof CompanyForm>(
@@ -1846,24 +1990,11 @@ function App() {
   };
 
   const openMaterialCategory = (category: MaterialCategory) => {
-    setActiveMaterialCategory(category);
-    setActiveMaterialSubcategory("全部");
-    setNewSubcategoryName("");
-    setMaterialSearchKeyword("");
-    setExpandedTextMaterialId(null);
-    setIsTextMaterialFormOpen(false);
-    setEditingTextMaterialId(null);
-    setTextMaterialForm(createEmptyTextMaterialForm(category));
+    navigateToRoute(`materials/${category}`);
   };
 
   const closeMaterialCategory = () => {
-    setActiveMaterialCategory(null);
-    setActiveMaterialSubcategory("全部");
-    setNewSubcategoryName("");
-    setMaterialSearchKeyword("");
-    setExpandedTextMaterialId(null);
-    setIsTextMaterialFormOpen(false);
-    resetTextMaterialForm(null);
+    navigateToRoute("materials");
   };
 
   const createMaterialSubcategoryWithName = async (rawName: string) => {
@@ -2128,16 +2259,12 @@ function App() {
   };
 
   const openPersonalMaterialsFolder = () => {
-    setActivePersonalMaterialsFolder(true);
-    setActivePersonalFileKind("全部");
-    setPersonalFileSearchKeyword("");
+    navigateToRoute("materials/personal");
   };
 
   const closePersonalMaterialsFolder = () => {
-    setActivePersonalMaterialsFolder(false);
-    setActivePersonalFileKind("全部");
+    navigateToRoute("materials");
     setNewPersonalMaterialCategoryName("");
-    setPersonalFileSearchKeyword("");
     resetPersonalMaterialForm();
     setIsPersonalMaterialFormOpen(false);
     setIsPersonalCategoryManageOpen(false);
@@ -2701,7 +2828,7 @@ function App() {
       <header className="header app-header-row">
         <div>
           <h1>JobFlow</h1>
-          <p>求职进度、DDL、面试安排和公司账号信息管理工具</p>
+        
           <p className="login-user">当前登录：{user.email}</p>
         </div>
 
@@ -2710,40 +2837,51 @@ function App() {
         </button>
       </header>
 
-      <section className="module-nav">
-        <button
-          className={`module-tab ${activePage === "companies" ? "active" : ""}`}
-          onClick={() => setActivePage("companies")}
-        >
-          公司管理
-        </button>
+      <section className="module-nav-shell">
+        {activePage === "materials" &&
+          (activeMaterialCategory || activePersonalMaterialsFolder) && (
+            <button
+              className="module-back-button"
+              type="button"
+              onClick={
+                activePersonalMaterialsFolder
+                  ? closePersonalMaterialsFolder
+                  : closeMaterialCategory
+              }
+            >
+              ← 返回
+            </button>
+          )}
 
-        <button
-          className={`module-tab ${activePage === "calendar" ? "active" : ""}`}
-          onClick={() => setActivePage("calendar")}
-        >
-          日历
-        </button>
+        <section className="module-nav">
+          <button
+            className={`module-tab ${activePage === "companies" ? "active" : ""}`}
+            onClick={() => navigateToRoute("companies")}
+          >
+            公司管理
+          </button>
 
-        <button
-          className={`module-tab ${activePage === "materials" ? "active" : ""}`}
-          onClick={() => {
-            setActivePage("materials");
-            setActiveMaterialCategory(null);
-            setActivePersonalMaterialsFolder(false);
-            setActiveMaterialSubcategory("全部");
-            setActivePersonalFileKind("全部");
-            setNewSubcategoryName("");
-            setMaterialSearchKeyword("");
-            setPersonalFileSearchKeyword("");
-            setExpandedTextMaterialId(null);
-            setIsTextMaterialFormOpen(false);
-            setEditingTextMaterialId(null);
-            setEditingPersonalMaterialFileId(null);
-          }}
-        >
-          材料库
-        </button>
+          <button
+            className={`module-tab ${activePage === "calendar" ? "active" : ""}`}
+            onClick={() => navigateToRoute("calendar")}
+          >
+            日历
+          </button>
+
+          <button
+            className={`module-tab ${activePage === "materials" ? "active" : ""}`}
+            onClick={() => navigateToRoute("materials")}
+          >
+            材料库
+          </button>
+
+          <button
+            className={`module-tab ${activePage === "backup" ? "active" : ""}`}
+            onClick={() => navigateToRoute("backup")}
+          >
+            数据管理
+          </button>
+        </section>
       </section>
 
       {activePage === "companies" && (
@@ -2766,7 +2904,7 @@ function App() {
                 className={`company-group-tab company-group-tab-${group.key} ${
                   activeCompanyGroupKey === group.key ? "active" : ""
                 }`}
-                onClick={() => setActiveCompanyGroupKey(group.key)}
+                onClick={() => navigateToRoute(`companies/${group.key}`)}
               >
                 <span>{group.label}</span>
                 <strong>{group.count} 社</strong>
@@ -3384,15 +3522,15 @@ function App() {
       {activePage === "calendar" && (
         <section className="calendar-section">
           <div className="calendar-header">
-            <h2>日历</h2>
-            <p>只显示每家公司当前阶段中需要主动处理的下一件事项。</p>
+      
+          
           </div>
 
           <div className="calendar-card action-list-card">
             <div className="action-list-header">
               <div>
-                <h3>当前待办事项</h3>
-                <p>按时间排序，只包含进行中公司的当前阶段。</p>
+                <h3>待办事项</h3>
+                
               </div>
               <span className="material-folder-count">
                 {currentActionItems.length} 件
@@ -3452,7 +3590,9 @@ function App() {
             )}
           </div>
 
-          {selectedCalendarEvent && (
+
+
+      {selectedCalendarEvent && (
             <div
               className="calendar-detail-overlay"
               onClick={() => setSelectedCalendarEvent(null)}
@@ -3586,6 +3726,33 @@ function App() {
         </section>
       )}
 
+      {activePage === "backup" && (
+    <section className="backup-page">
+     
+
+      <article className="backup-card">
+        <div className="backup-card-main">
+          <span className="backup-card-icon">💾</span>
+          <div>
+            <h3>导出本地备份</h3>
+            
+          </div>
+        </div>
+
+        <div className="backup-summary-grid">
+          <span>公司：{companies.length} 条</span>
+          <span>文本材料：{textMaterials.length} 条</span>
+          <span>文本分类：{materialSubcategories.length} 条</span>
+          <span>个人材料链接：{personalMaterialFiles.length} 条</span>
+        </div>
+
+        <button className="primary-button" type="button" onClick={handleExportBackup}>
+          导出本地备份 JSON
+        </button>
+      </article>
+    </section>
+      )}
+
       {activePage === "materials" && (
         <section className="materials-page">
           {!activeMaterialCategory && !activePersonalMaterialsFolder && (
@@ -3633,18 +3800,11 @@ function App() {
             <>
               <div className="materials-header materials-header-row">
                 <div>
-                  <button
-                    className="text-button back-folder-button"
-                    type="button"
-                    onClick={closePersonalMaterialsFolder}
-                  >
-                    ← 返回材料库
-                  </button>
                   <h2>
                     <span className="folder-title-icon">📁</span>
                     个人材料
                   </h2>
-                  <p>登记 Google Drive、Dropbox、OneDrive 等网盘链接。文件本体放在网盘里，JobFlow 只保存名称、类别、链接和备注。</p>
+                 
                 </div>
 
                 <div className="material-header-actions">
@@ -3938,13 +4098,6 @@ function App() {
             <>
               <div className="materials-header materials-header-row">
                 <div>
-                  <button
-                    className="text-button back-folder-button"
-                    type="button"
-                    onClick={closeMaterialCategory}
-                  >
-                    ← 返回材料库
-                  </button>
                   <h2>
                     <span className="folder-title-icon">
                       {activeMaterialCategoryInfo.icon}
