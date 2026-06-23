@@ -146,6 +146,19 @@ type Company = {
   flowItems: FlowItem[];
 };
 
+type CompanyMail = {
+  id: string;
+  subject: string;
+  body: string;
+  createdAt?: any;
+  updatedAt?: any;
+};
+
+type CompanyMailForm = {
+  subject: string;
+  body: string;
+};
+
 type CompanyForm = {
   name: string;
   position: string;
@@ -215,6 +228,75 @@ const createEmptyFlowItem = (): FlowItem => ({
   url: "",
   memo: "",
 });
+
+const createEmptyCompanyMailForm = (): CompanyMailForm => ({
+  subject: "",
+  body: "",
+});
+
+function cleanCompanyMailText(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\t/g, "　")
+    .replace(/\u00A0/g, " ")
+    .replace(/[ ]{3,}/g, "  ")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+}
+
+function isMailSeparatorLine(line: string) {
+  return /^[-ー－―─]{8,}$/.test(line.trim());
+}
+
+function isMailSectionHeading(line: string) {
+  const trimmed = line.trim();
+  return /^＜.+＞$/.test(trimmed) || /^【.+】$/.test(trimmed);
+}
+
+function renderMailLineWithLinks(line: string) {
+  const parts = line.split(/(https?:\/\/[^\s　]+)/g);
+
+  return parts.map((part, index) => {
+    if (/^https?:\/\//.test(part)) {
+      return (
+        <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">
+          {part}
+        </a>
+      );
+    }
+
+    return <span key={`${part}-${index}`}>{part}</span>;
+  });
+}
+
+function renderCompanyMailBody(body: string) {
+  const lines = cleanCompanyMailText(body).split("\n");
+
+  return lines.map((line, index) => {
+    if (line.trim() === "") {
+      return <div className="company-mail-body-blank" key={`blank-${index}`} />;
+    }
+
+    if (isMailSeparatorLine(line)) {
+      return <div className="company-mail-separator" key={`separator-${index}`} />;
+    }
+
+    if (isMailSectionHeading(line)) {
+      return (
+        <div className="company-mail-section-heading" key={`heading-${index}`}>
+          {line.trim()}
+        </div>
+      );
+    }
+
+    return (
+      <div className="company-mail-body-line" key={`line-${index}`}>
+        {renderMailLineWithLinks(line.trimStart())}
+      </div>
+    );
+  });
+}
 
 
 const materialCategoryOptions: {
@@ -676,6 +758,15 @@ function App() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(false);
 
+  const [mailboxCompanyId, setMailboxCompanyId] = useState<string | null>(null);
+  const [companyMails, setCompanyMails] = useState<CompanyMail[]>([]);
+  const [companyMailsLoading, setCompanyMailsLoading] = useState(false);
+  const [selectedCompanyMailId, setSelectedCompanyMailId] = useState<string | null>(null);
+  const [isCompanyMailFormOpen, setIsCompanyMailFormOpen] = useState(false);
+  const [companyMailForm, setCompanyMailForm] = useState<CompanyMailForm>(
+    createEmptyCompanyMailForm,
+  );
+
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [form, setForm] = useState<CompanyForm>(createEmptyForm);
@@ -894,7 +985,9 @@ function App() {
       isPersonalMaterialFormOpen ||
       isTextCategoryManageOpen ||
       isPersonalCategoryManageOpen ||
-      selectedCalendarEvent !== null;
+      selectedCalendarEvent !== null ||
+      mailboxCompanyId !== null ||
+      isCompanyMailFormOpen;
 
     if (!hasOpenModal) return;
 
@@ -921,6 +1014,8 @@ function App() {
     isTextCategoryManageOpen,
     isPersonalCategoryManageOpen,
     selectedCalendarEvent,
+    mailboxCompanyId,
+    isCompanyMailFormOpen,
   ]);
 
   useEffect(() => {
@@ -981,6 +1076,58 @@ function App() {
 
     return () => unsubscribe();
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !mailboxCompanyId) {
+      setCompanyMails([]);
+      setCompanyMailsLoading(false);
+      setSelectedCompanyMailId(null);
+      return;
+    }
+
+    setCompanyMailsLoading(true);
+
+    const mailsRef = collection(
+      db,
+      "users",
+      user.uid,
+      "companies",
+      mailboxCompanyId,
+      "mails",
+    );
+    const mailsQuery = query(mailsRef, orderBy("createdAt", "desc"));
+
+    const unsubscribe = onSnapshot(
+      mailsQuery,
+      (snapshot) => {
+        const loadedMails: CompanyMail[] = snapshot.docs.map((document) => {
+          const data = document.data();
+
+          return {
+            id: document.id,
+            subject: data.subject ?? "",
+            body: data.body ?? "",
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+          };
+        });
+
+        setCompanyMails(loadedMails);
+        setSelectedCompanyMailId((prev) => {
+          if (prev && loadedMails.some((mail) => mail.id === prev)) return prev;
+          return null;
+        });
+        setCompanyMailsLoading(false);
+      },
+      (error) => {
+        console.error(error);
+        setCompanyMailsLoading(false);
+        alert("读取公司信箱失败");
+      },
+    );
+
+    return () => unsubscribe();
+  }, [user, mailboxCompanyId]);
 
   useEffect(() => {
     if (!user) {
@@ -1492,6 +1639,16 @@ function App() {
       }));
   }, [filteredCompanies, activeCompanyGroupKey]);
 
+  const mailboxCompany = useMemo(() => {
+    if (!mailboxCompanyId) return null;
+    return companies.find((company) => company.id === mailboxCompanyId) ?? null;
+  }, [companies, mailboxCompanyId]);
+
+  const selectedCompanyMail = useMemo(() => {
+    if (!selectedCompanyMailId) return null;
+    return companyMails.find((mail) => mail.id === selectedCompanyMailId) ?? null;
+  }, [companyMails, selectedCompanyMailId]);
+
   const handleAuth = async () => {
     setAuthError("");
 
@@ -1530,6 +1687,12 @@ function App() {
   const handleLogout = async () => {
     await signOut(auth);
     setCompanies([]);
+    setCompanyMails([]);
+    setCompanyMailsLoading(false);
+    setMailboxCompanyId(null);
+    setSelectedCompanyMailId(null);
+    setIsCompanyMailFormOpen(false);
+    setCompanyMailForm(createEmptyCompanyMailForm());
     setIsFormOpen(false);
     setEditingCompanyId(null);
     setForm(createEmptyForm());
@@ -1700,6 +1863,97 @@ function App() {
     setIsDetailFormOpen(false);
     setDetailCompanyId(null);
     setDetailItem(null);
+  };
+
+  const openCompanyMailbox = (company: Company) => {
+    setIsFormOpen(false);
+    setIsDetailFormOpen(false);
+    setDetailCompanyId(null);
+    setDetailItem(null);
+    setMailboxCompanyId(company.id);
+    setSelectedCompanyMailId(null);
+    setIsCompanyMailFormOpen(false);
+    setCompanyMailForm(createEmptyCompanyMailForm());
+  };
+
+  const closeCompanyMailbox = () => {
+    setMailboxCompanyId(null);
+    setCompanyMails([]);
+    setCompanyMailsLoading(false);
+    setSelectedCompanyMailId(null);
+    setIsCompanyMailFormOpen(false);
+    setCompanyMailForm(createEmptyCompanyMailForm());
+  };
+
+  const openAddCompanyMailForm = () => {
+    setCompanyMailForm(createEmptyCompanyMailForm());
+    setIsCompanyMailFormOpen(true);
+  };
+
+  const closeCompanyMailForm = () => {
+    setCompanyMailForm(createEmptyCompanyMailForm());
+    setIsCompanyMailFormOpen(false);
+  };
+
+  const updateCompanyMailFormField = <K extends keyof CompanyMailForm>(
+    field: K,
+    value: CompanyMailForm[K],
+  ) => {
+    setCompanyMailForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const saveCompanyMail = async () => {
+    if (!user || !mailboxCompanyId) return;
+
+    const subject = companyMailForm.subject.trim();
+    const body = cleanCompanyMailText(companyMailForm.body);
+
+    if (!subject) {
+      alert("请输入邮件标题");
+      return;
+    }
+
+    if (!body) {
+      alert("请输入邮件正文");
+      return;
+    }
+
+    try {
+      const mailRef = await addDoc(
+        collection(db, "users", user.uid, "companies", mailboxCompanyId, "mails"),
+        {
+          subject,
+          body,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+      );
+
+      setSelectedCompanyMailId(mailRef.id);
+      closeCompanyMailForm();
+    } catch (error) {
+      console.error(error);
+      alert("保存邮件失败");
+    }
+  };
+
+  const removeCompanyMail = async (mail: CompanyMail) => {
+    if (!user || !mailboxCompanyId) return;
+
+    const ok = window.confirm(`确定要删除「${mail.subject}」吗？`);
+    if (!ok) return;
+
+    try {
+      await deleteDoc(
+        doc(db, "users", user.uid, "companies", mailboxCompanyId, "mails", mail.id),
+      );
+    } catch (error) {
+      console.error(error);
+      alert("删除邮件失败");
+    }
   };
 
   const saveCompany = async () => {
@@ -3190,6 +3444,139 @@ function App() {
             </div>
           )}
 
+          {mailboxCompany && (
+            <div className="app-modal-overlay company-mailbox-overlay" onClick={closeCompanyMailbox}>
+              <section
+                className="company-mailbox-modal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="company-mailbox-window-header">
+                  <h2>{mailboxCompany.name}</h2>
+                  <button
+                    className="company-mailbox-close-button"
+                    onClick={closeCompanyMailbox}
+                    aria-label="关闭公司信箱"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="company-mailbox-layout">
+                  <aside className="company-mail-list-pane">
+                    <div className="company-mail-list-title">
+                      <div>
+                        <span>收件箱</span>
+                        <strong>{companyMails.length} 封</strong>
+                      </div>
+                      <div className="company-mail-list-actions">
+                        <button className="primary-button" onClick={openAddCompanyMailForm}>
+                          ＋新增邮件
+                        </button>
+                      </div>
+                    </div>
+
+                    {companyMailsLoading && (
+                      <div className="company-mail-empty">读取邮件中...</div>
+                    )}
+
+                    {!companyMailsLoading && companyMails.length === 0 && (
+                      <div className="company-mail-empty">
+                        这个公司的信箱现在是空的。点击“新增邮件”开始保存。
+                      </div>
+                    )}
+
+                    {!companyMailsLoading &&
+                      companyMails.map((mail) => (
+                        <button
+                          key={mail.id}
+                          className={`company-mail-list-item ${
+                            selectedCompanyMailId === mail.id ? "active" : ""
+                          }`}
+                          onClick={() =>
+                            setSelectedCompanyMailId((currentId) =>
+                              currentId === mail.id ? null : mail.id,
+                            )
+                          }
+                        >
+                          <span className="company-mail-list-icon">✉</span>
+                          <span className="company-mail-list-content">
+                            <strong>{mail.subject}</strong>
+                          </span>
+                        </button>
+                      ))}
+                  </aside>
+
+                  {selectedCompanyMail && (
+                    <section className="company-mail-detail-pane">
+                      <div className="company-mail-detail-header">
+                        <h3>{selectedCompanyMail.subject}</h3>
+
+                        <button
+                          className="danger-button"
+                          onClick={() => removeCompanyMail(selectedCompanyMail)}
+                        >
+                          删除邮件
+                        </button>
+                      </div>
+
+                      <div className="company-mail-body-card">
+                        {renderCompanyMailBody(selectedCompanyMail.body)}
+                      </div>
+                    </section>
+                  )}
+                </div>
+
+                {isCompanyMailFormOpen && (
+                  <div
+                    className="company-mail-form-overlay"
+                    onClick={closeCompanyMailForm}
+                  >
+                    <div
+                      className="company-mail-form-dialog"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="form-header">
+                        <h3>新增邮件</h3>
+                        <button className="secondary-button" onClick={closeCompanyMailForm}>
+                          取消
+                        </button>
+                      </div>
+
+                      <label>
+                        邮件标题
+                        <input
+                          value={companyMailForm.subject}
+                          onChange={(event) =>
+                            updateCompanyMailFormField("subject", event.target.value)
+                          }
+                          placeholder="例：【株式会社マーブル】エントリーありがとうございます"
+                        />
+                      </label>
+
+                      <label className="memo-field">
+                        邮件正文
+                        <textarea
+                          className="company-mail-body-textarea"
+                          value={companyMailForm.body}
+                          onChange={(event) =>
+                            updateCompanyMailFormField("body", event.target.value)
+                          }
+                          placeholder="把邮件正文原文粘贴到这里。保存后会自动清理多余空格，并按邮件段落美观显示。"
+                        />
+                      </label>
+
+                      <div className="form-actions">
+                        <button className="primary-button" onClick={saveCompanyMail}>
+                          保存邮件
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
           <section className="company-list">
             {companiesLoading && <div className="empty-card">加载中...</div>}
 
@@ -3248,6 +3635,14 @@ function App() {
 
                       <div className="card-side">
                         <div className="card-actions">
+                          <button
+                            className="mailbox-icon-button"
+                            onClick={() => openCompanyMailbox(company)}
+                            title="打开公司信箱"
+                            aria-label={`${company.name} 的信箱`}
+                          >
+                            <span className="mailbox-envelope" aria-hidden="true" />
+                          </button>
                           <button
                             className="secondary-button"
                             onClick={() => openEditForm(company)}
