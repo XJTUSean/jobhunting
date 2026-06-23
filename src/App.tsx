@@ -11,6 +11,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -931,35 +932,75 @@ function App() {
     window.location.hash = nextHash;
   };
 
-  const handleExportBackup = () => {
-    const backup = {
-      app: "JobFlow",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      user: {
-        uid: user?.uid ?? "",
-        email: user?.email ?? "",
-      },
-      companies,
-      textMaterials,
-      materialSubcategories,
-      personalMaterialFiles,
-      personalMaterialCategories,
-    };
+  const handleExportBackup = async () => {
+    if (!user) {
+      alert("请先登录后再导出备份");
+      return;
+    }
 
-    const blob = new Blob([JSON.stringify(backup, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const date = new Date().toISOString().slice(0, 10);
+    try {
+      const companyMailsByCompanyId = await Promise.all(
+        companies.map(async (company) => {
+          const mailsRef = collection(
+            db,
+            "users",
+            user.uid,
+            "companies",
+            company.id,
+            "mails",
+          );
+          const mailsSnapshot = await getDocs(query(mailsRef, orderBy("createdAt", "desc")));
+          const mails = mailsSnapshot.docs.map((document) => {
+            const data = document.data();
 
-    link.href = url;
-    link.download = `jobflow-backup-${date}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+            return {
+              id: document.id,
+              companyId: company.id,
+              companyName: company.name,
+              subject: data.subject ?? "",
+              body: data.body ?? "",
+              createdAt: data.createdAt,
+              updatedAt: data.updatedAt,
+            };
+          });
+
+          return [company.id, mails] as const;
+        }),
+      );
+
+      const backup = {
+        app: "JobFlow",
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        user: {
+          uid: user.uid,
+          email: user.email ?? "",
+        },
+        companies,
+        companyMails: Object.fromEntries(companyMailsByCompanyId),
+        textMaterials,
+        materialSubcategories,
+        personalMaterialFiles,
+        personalMaterialCategories,
+      };
+
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const date = new Date().toISOString().slice(0, 10);
+
+      link.href = url;
+      link.download = `jobflow-backup-${date}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      alert("导出备份失败，请稍后再试");
+    }
   };
 
   useEffect(() => {
