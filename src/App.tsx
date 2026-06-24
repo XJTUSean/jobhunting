@@ -16,6 +16,8 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
+  Timestamp,
   updateDoc,
 } from "firebase/firestore";
 import FullCalendar from "@fullcalendar/react";
@@ -25,6 +27,20 @@ import interactionPlugin from "@fullcalendar/interaction";
 import zhCnLocale from "@fullcalendar/core/locales/zh-cn";
 import { auth, db } from "./firebase";
 import "./App.css";
+import jobflowLogo from "../assets/jobflow.png";
+import personalMaterialsIcon from "../assets/01_personal_materials.png";
+import selfAnalysisIcon from "../assets/02_self_analysis.png";
+import interviewQuestionsIcon from "../assets/03_interview_questions.png";
+import esEntrySheetIcon from "../assets/04_es_entry_sheet.png";
+import companyResearchIcon from "../assets/05_company_research.png";
+import jobTypeResearchIcon from "../assets/06_job_type_research.png";
+import selfPrMaterialIcon from "../assets/07_self_pr_material_library.png";
+import gakuchikaMaterialIcon from "../assets/08_gakuchika_material_library.png";
+import researchDescriptionIcon from "../assets/09_research_description.png";
+import setbackFailureIcon from "../assets/10_setback_failure_experience_material_library.png";
+import reverseQuestionsIcon from "../assets/11_reverse_questions.png";
+import selfIntroductionIcon from "../assets/12_self_introduction.png";
+import jobHuntingAxisIcon from "../assets/13_job_hunting_axis.png";
 
 type Priority = "high" | "middle" | "low";
 type CompanyStatus = "active" | "waiting" | "passed" | "rejected" | "declined";
@@ -300,24 +316,62 @@ function renderCompanyMailBody(body: string) {
 }
 
 
+function restoreBackupTimestamp(value: any) {
+  if (!value) return serverTimestamp();
+
+  if (typeof value.toDate === "function") return value;
+
+  if (typeof value.seconds === "number") {
+    const nanoseconds =
+      typeof value.nanoseconds === "number" ? value.nanoseconds : 0;
+    return new Timestamp(value.seconds, nanoseconds);
+  }
+
+  if (typeof value === "string") {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return Timestamp.fromDate(date);
+    }
+  }
+
+  return value;
+}
+
+function removeUndefinedFields<T extends Record<string, any>>(value: T) {
+  const cleaned: Record<string, any> = {};
+
+  Object.entries(value).forEach(([key, fieldValue]) => {
+    if (fieldValue !== undefined) {
+      cleaned[key] = fieldValue;
+    }
+  });
+
+  return cleaned;
+}
+
+function normalizeBackupArray(value: any) {
+  return Array.isArray(value) ? value : [];
+}
+
+
 const materialCategoryOptions: {
   value: MaterialCategory;
   label: string;
   description: string;
   icon: string;
 }[] = [
-  { value: "self_analysis", label: "自我分析", description: "性格、价值观、强项弱项、经验整理", icon: "🧭" },
-  { value: "interview_questions", label: "面试问题集", description: "面试问题集与回答", icon: "💬" },
-  { value: "es", label: "ES", description: "ES 答案、志望动机、公司别提交稿", icon: "📝" },
-  { value: "company_research", label: "企业研究表", description: "企业业务、强项、竞合、志望理由素材", icon: "🏢" },
-  { value: "job_type_research", label: "职种研究表", description: "生产技术、开发、SE 等职种理解", icon: "🧪" },
-  { value: "self_pr", label: "自己PR素材库", description: "强项、理由、具体例、学到的东西", icon: "⭐" },
-  { value: "gakuchika", label: "ガクチカ素材库", description: "学生时代努力过的事、STAR 结构素材", icon: "🔥" },
-  { value: "research_content", label: "研究内容说明", description: "研究概要、难点、方法、成果、意义", icon: "🔬" },
-  { value: "failure_experience", label: "挫折・失败经历素材库", description: "失败经验、改善行动、学到的教训", icon: "🌱" },
-  { value: "reverse_questions", label: "逆質問问题集", description: "把想问的问题作为标题，正文保存补充说明", icon: "❓" },
-  { value: "self_introduction", label: "自我介绍", description: "30 秒、1 分钟、日语/中文自我介绍", icon: "🙋" },
-  { value: "career_axis", label: "就活轴", description: "选公司标准、行业偏好、职业目标", icon: "🎯" },
+  { value: "self_analysis", label: "自我分析", description: "性格、价值观、强项弱项、经验整理", icon: selfAnalysisIcon },
+  { value: "interview_questions", label: "面试问题集", description: "面试问题集与回答", icon: interviewQuestionsIcon },
+  { value: "es", label: "ES", description: "ES 答案、志望动机、公司别提交稿", icon: esEntrySheetIcon },
+  { value: "company_research", label: "企业研究表", description: "企业业务、强项、竞合、志望理由素材", icon: companyResearchIcon },
+  { value: "job_type_research", label: "职种研究表", description: "生产技术、开发、SE 等职种理解", icon: jobTypeResearchIcon },
+  { value: "self_pr", label: "自己PR素材库", description: "强项、理由、具体例、学到的东西", icon: selfPrMaterialIcon },
+  { value: "gakuchika", label: "ガクチカ素材库", description: "学生时代努力过的事、STAR 结构素材", icon: gakuchikaMaterialIcon },
+  { value: "research_content", label: "研究内容说明", description: "研究概要、难点、方法、成果、意义", icon: researchDescriptionIcon },
+  { value: "failure_experience", label: "挫折・失败经历素材库", description: "失败经验、改善行动、学到的教训", icon: setbackFailureIcon },
+  { value: "reverse_questions", label: "逆質問问题集", description: "把想问的问题作为标题，正文保存补充说明", icon: reverseQuestionsIcon },
+  { value: "self_introduction", label: "自我介绍", description: "30 秒、1 分钟、日语/中文自我介绍", icon: selfIntroductionIcon },
+  { value: "career_axis", label: "就活轴", description: "选公司标准、行业偏好、职业目标", icon: jobHuntingAxisIcon },
 ];
 
 const DEFAULT_PERSONAL_MATERIAL_CATEGORY = "其他";
@@ -1000,6 +1054,195 @@ function App() {
     } catch (error) {
       console.error(error);
       alert("导出备份失败，请稍后再试");
+    }
+  };
+
+  const handleImportBackup = async (event: any) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!user) {
+      alert("请先登录后再导入备份");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "导入会把备份里的公司、材料、个人材料和公司信箱写入当前账号。相同 ID 的内容会被覆盖，其他现有内容不会自动删除。确定导入吗？",
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const backup = JSON.parse(await file.text());
+
+      if (backup?.app !== "JobFlow") {
+        alert("这不是 JobFlow 备份文件");
+        return;
+      }
+
+      const companiesToImport = normalizeBackupArray(backup.companies);
+      const textMaterialsToImport = normalizeBackupArray(backup.textMaterials);
+      const materialSubcategoriesToImport = normalizeBackupArray(
+        backup.materialSubcategories,
+      );
+      const personalMaterialFilesToImport = normalizeBackupArray(
+        backup.personalMaterialFiles,
+      );
+      const personalMaterialCategoriesToImport = normalizeBackupArray(
+        backup.personalMaterialCategories,
+      );
+      const companyMailsToImport =
+        backup.companyMails && typeof backup.companyMails === "object"
+          ? backup.companyMails
+          : {};
+
+      for (const company of companiesToImport) {
+        const companyId = String(company.id ?? "").trim();
+        if (!companyId) continue;
+
+        const companyRef = doc(db, "users", user.uid, "companies", companyId);
+        const companyData = { ...company };
+        delete companyData.id;
+
+        await setDoc(
+          companyRef,
+          removeUndefinedFields({
+            ...companyData,
+            name: companyData.name ?? "",
+            position: companyData.position ?? "",
+            priority: companyData.priority ?? "middle",
+            status: companyData.status ?? "active",
+            myPageUrl: companyData.myPageUrl ?? "",
+            loginId: companyData.loginId ?? "",
+            loginPassword: companyData.loginPassword ?? "",
+            memo: companyData.memo ?? "",
+            flowItems: Array.isArray(companyData.flowItems)
+              ? companyData.flowItems
+              : [],
+            createdAt: restoreBackupTimestamp(companyData.createdAt),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true },
+        );
+      }
+
+      for (const material of textMaterialsToImport) {
+        const materialId = String(material.id ?? "").trim();
+        if (!materialId) continue;
+
+        const materialData = { ...material };
+        delete materialData.id;
+        await setDoc(
+          doc(db, "users", user.uid, "textMaterials", materialId),
+          removeUndefinedFields({
+            ...materialData,
+            title: materialData.title ?? "",
+            category: normalizeMaterialCategory(materialData.category),
+            subcategory: normalizeSubcategoryName(materialData.subcategory),
+            body: materialData.body ?? "",
+            companyName: materialData.companyName ?? "",
+            memo: materialData.memo ?? "",
+            createdAt: restoreBackupTimestamp(materialData.createdAt),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true },
+        );
+      }
+
+      for (const subcategory of materialSubcategoriesToImport) {
+        const subcategoryId = String(subcategory.id ?? "").trim();
+        if (!subcategoryId) continue;
+
+        const subcategoryData = { ...subcategory };
+        delete subcategoryData.id;
+        await setDoc(
+          doc(db, "users", user.uid, "materialSubcategories", subcategoryId),
+          removeUndefinedFields({
+            ...subcategoryData,
+            parentCategory: normalizeMaterialCategory(
+              subcategoryData.parentCategory,
+            ),
+            name: normalizeSubcategoryName(subcategoryData.name),
+            createdAt: restoreBackupTimestamp(subcategoryData.createdAt),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true },
+        );
+      }
+
+      for (const fileItem of personalMaterialFilesToImport) {
+        const fileId = String(fileItem.id ?? "").trim();
+        if (!fileId) continue;
+
+        const fileData = { ...fileItem };
+        delete fileData.id;
+        await setDoc(
+          doc(db, "users", user.uid, "materialFiles", fileId),
+          removeUndefinedFields({
+            ...fileData,
+            name: fileData.name ?? "",
+            fileUrl: fileData.fileUrl ?? "",
+            kind: normalizePersonalMaterialKind(fileData.kind),
+            memo: fileData.memo ?? "",
+            createdAt: restoreBackupTimestamp(fileData.createdAt),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true },
+        );
+      }
+
+      for (const category of personalMaterialCategoriesToImport) {
+        const categoryId = String(category.id ?? "").trim();
+        if (!categoryId) continue;
+
+        const categoryData = { ...category };
+        delete categoryData.id;
+        await setDoc(
+          doc(db, "users", user.uid, "materialFileCategories", categoryId),
+          removeUndefinedFields({
+            ...categoryData,
+            name: normalizePersonalMaterialKind(categoryData.name),
+            createdAt: restoreBackupTimestamp(categoryData.createdAt),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true },
+        );
+      }
+
+      for (const [companyId, mails] of Object.entries(companyMailsToImport)) {
+        if (!Array.isArray(mails)) continue;
+
+        for (const mail of mails as any[]) {
+          const mailId = String(mail.id ?? "").trim();
+          if (!mailId) continue;
+
+          await setDoc(
+            doc(
+              db,
+              "users",
+              user.uid,
+              "companies",
+              companyId,
+              "mails",
+              mailId,
+            ),
+            removeUndefinedFields({
+              subject: mail.subject ?? "",
+              body: cleanCompanyMailText(mail.body ?? ""),
+              createdAt: restoreBackupTimestamp(mail.createdAt),
+              updatedAt: serverTimestamp(),
+            }),
+            { merge: true },
+          );
+        }
+      }
+
+      alert("导入完成");
+    } catch (error) {
+      console.error(error);
+      alert("导入失败，请确认 JSON 文件格式是否正确");
     }
   };
 
@@ -3053,11 +3296,12 @@ function App() {
     return (
       <main className="auth-page">
         <section className="auth-card">
-          <h1>JobFlow</h1>
-          <p>请登录后管理你的求职进度和公司账号信息。</p>
+          <img className="app-logo-image" src={jobflowLogo} alt="JobFlow" />
+          <p></p>
+          
 
           <label>
-            邮箱
+            
             <input
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -3066,18 +3310,18 @@ function App() {
           </label>
 
           <label>
-            密码
+            
             <div className="inline-input-button">
               <input
                 type={showAuthPassword ? "text" : "password"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="至少 6 位"
+                placeholder="请输入密码"
               />
               <button
                 type="button"
-                className="mini-button"
-                onClick={() => setShowAuthPassword((prev) => !prev)}
+                className="mini-button auth-password-toggle"
+                onClick={() => setShowAuthPassword((current) => !current)}
               >
                 {showAuthPassword ? "隐藏" : "显示"}
               </button>
@@ -3086,7 +3330,7 @@ function App() {
 
           {isRegisterMode && (
             <label>
-              确认密码
+              
               <input
                 type={showAuthPassword ? "text" : "password"}
                 value={passwordConfirm}
@@ -3122,7 +3366,7 @@ function App() {
     <main className="app">
       <header className="header app-header-row">
         <div>
-          <h1>JobFlow</h1>
+          <img className="app-logo-image" src={jobflowLogo} alt="JobFlow" />
         
           <p className="login-user">当前登录：{user.email}</p>
         </div>
@@ -3602,7 +3846,7 @@ function App() {
                           onChange={(event) =>
                             updateCompanyMailFormField("body", event.target.value)
                           }
-                          placeholder="把邮件正文原文粘贴到这里。保存后会自动清理多余空格，并按邮件段落美观显示。"
+                          placeholder="把邮件正文原文粘贴到这里"
                         />
                       </label>
 
@@ -4182,9 +4426,21 @@ function App() {
           <span>个人材料链接：{personalMaterialFiles.length} 条</span>
         </div>
 
-        <button className="primary-button" type="button" onClick={handleExportBackup}>
-          导出本地备份 JSON
-        </button>
+        <div className="backup-actions">
+          <button className="primary-button" type="button" onClick={handleExportBackup}>
+            导出本地备份 JSON
+          </button>
+
+          <label className="secondary-button backup-import-button">
+            导入本地备份 JSON
+            <input
+              className="backup-file-input"
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportBackup}
+            />
+          </label>
+        </div>
       </article>
     </section>
       )}
@@ -4199,7 +4455,7 @@ function App() {
                   type="button"
                   onClick={openPersonalMaterialsFolder}
                 >
-                  <span className="material-folder-icon">📁</span>
+                  <span className="material-folder-icon"><img src={personalMaterialsIcon} alt="个人材料" /></span>
                   <span className="material-folder-content">
                     <strong>个人材料</strong>
                     <small>登记 Google Drive、Dropbox、OneDrive 等网盘链接</small>
@@ -4218,7 +4474,7 @@ function App() {
                     type="button"
                     onClick={() => openMaterialCategory(category.value)}
                   >
-                    <span className="material-folder-icon">{category.icon}</span>
+                    <span className="material-folder-icon"><img src={category.icon} alt={category.label} /></span>
                     <span className="material-folder-content">
                       <strong>{category.label}</strong>
                       <small>{category.description}</small>
@@ -4237,7 +4493,7 @@ function App() {
               <div className="materials-header materials-header-row">
                 <div>
                   <h2>
-                    <span className="folder-title-icon">📁</span>
+                    <span className="folder-title-icon"><img src={personalMaterialsIcon} alt="个人材料" /></span>
                     个人材料
                   </h2>
                  
@@ -4536,7 +4792,7 @@ function App() {
                 <div>
                   <h2>
                     <span className="folder-title-icon">
-                      {activeMaterialCategoryInfo.icon}
+                      <img src={activeMaterialCategoryInfo.icon} alt={activeMaterialCategoryInfo.label} />
                     </span>
                     {activeMaterialCategoryInfo.label}
                   </h2>
