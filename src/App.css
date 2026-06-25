@@ -5919,3 +5919,39 @@ button {
     min-width: 580px !important;
   }
 }
+
+/* ===== Text material detail left align like mailbox ===== */
+.text-material-card,
+.text-material-card-header,
+.text-material-card h3,
+.material-body,
+.material-body-preview,
+.material-body-full,
+.material-memo,
+.qa-block,
+.qa-block p,
+.qa-block > div {
+  text-align: left !important;
+}
+
+.material-body,
+.material-memo,
+.qa-block p {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  line-height: 1.9 !important;
+}
+
+.text-material-card-header {
+  align-items: flex-start !important;
+}
+
+.text-material-card .badge-row,
+.text-material-card .material-badge-row,
+.text-material-card .tag-row {
+  justify-content: flex-start !important;
+}
+
+.text-material-card .material-meta-row {
+  justify-content: flex-start !important;
+}
