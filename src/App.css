@@ -5294,3 +5294,628 @@ label {
 .auth-card .inline-input-button {
   align-items: center;
 }
+
+/* =====================================================================
+   Final responsive override for PC / tablet / mobile
+   Keep this block at the very bottom of App.css.
+   ===================================================================== */
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+input,
+textarea,
+select,
+button {
+  max-width: 100%;
+}
+
+/* Tablet: slightly tighter but still desktop-like */
+@media (max-width: 1024px) {
+  .app {
+    width: min(100% - 32px, 1120px) !important;
+    padding: 30px 0 56px !important;
+  }
+
+  .toolbar-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 12px !important;
+    align-items: center !important;
+  }
+
+  .toolbar-row .search-input,
+  .search-input {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+
+  .toolbar-row button {
+    position: static !important;
+  }
+
+  .materials-grid,
+  .material-folder-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .company-mailbox-modal {
+    width: calc(100vw - 32px) !important;
+    height: calc(100vh - 32px) !important;
+    max-height: calc(100vh - 32px) !important;
+  }
+
+  .company-mailbox-layout {
+    grid-template-columns: 320px minmax(0, 1fr) !important;
+  }
+}
+
+/* Mobile: one-column layout, full-width controls, scrollable modals */
+@media (max-width: 760px) {
+  html,
+  body {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  .app {
+    width: calc(100% - 20px) !important;
+    max-width: calc(100% - 20px) !important;
+    padding: 18px 0 42px !important;
+  }
+
+  .header {
+    margin-bottom: 18px !important;
+  }
+
+  .app-header-row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    justify-items: center !important;
+    text-align: center !important;
+  }
+
+  .app-header-row .secondary-button {
+    position: static !important;
+    width: 100% !important;
+  }
+
+  .app-logo-image {
+    width: min(100%, 300px) !important;
+    max-height: 110px !important;
+    object-fit: contain !important;
+  }
+
+  .login-user {
+    max-width: 100% !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .module-nav-shell {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    min-height: auto !important;
+    margin: 16px auto 18px !important;
+  }
+
+  .module-back-button {
+    position: static !important;
+    transform: none !important;
+    width: fit-content !important;
+    min-height: 46px !important;
+    justify-self: start !important;
+  }
+
+  .module-back-button:hover {
+    transform: translateX(-2px) !important;
+  }
+
+  .module-nav {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 6px !important;
+    border-radius: 22px !important;
+    margin: 0 !important;
+  }
+
+  .module-tab {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .toolbar,
+  .toolbar-row {
+    width: 100% !important;
+  }
+
+  .toolbar-row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+  }
+
+  .toolbar-row .search-input,
+  .search-input {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+
+  .toolbar-row button {
+    position: static !important;
+    width: 100% !important;
+  }
+
+  .company-group-tabs,
+  .materials-grid,
+  .material-folder-grid,
+  .form-grid,
+  .event-editor-grid,
+  .material-interview-editor,
+  .materials-toolbar,
+  .personal-upload-box,
+  .personal-files-toolbar,
+  .category-create-box,
+  .category-manager-row,
+  .subcategory-create-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .company-card,
+  .materials-header,
+  .materials-card,
+  .calendar-card,
+  .form-card,
+  .text-material-card,
+  .subcategory-panel,
+  .backup-card {
+    width: 100% !important;
+    padding: 18px !important;
+    border-radius: 24px !important;
+  }
+
+  .company-card {
+    overflow: visible !important;
+  }
+
+  .company-header {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    min-height: auto !important;
+    text-align: center !important;
+  }
+
+  .company-header > div:first-child {
+    min-width: 0 !important;
+  }
+
+  .company-header h2 {
+    font-size: 24px !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .card-side {
+    position: static !important;
+    width: 100% !important;
+    align-items: stretch !important;
+  }
+
+  .card-actions {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .card-actions button,
+  .card-actions a {
+    width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  .mailbox-icon-button {
+    width: 100% !important;
+    height: 44px !important;
+  }
+
+  .badge-row,
+  .credential-row,
+  .password-row {
+    justify-content: center !important;
+  }
+
+  .credential-row span {
+    width: 100% !important;
+    max-width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  .flow {
+    width: 100% !important;
+    align-items: flex-start !important;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    padding: 12px !important;
+  }
+
+  .step-wrap {
+    flex: 0 0 auto !important;
+  }
+
+  .step {
+    max-width: 180px !important;
+    white-space: normal !important;
+  }
+
+  .current-flow-card,
+  .waiting-result-card,
+  .finished-result-card {
+    padding: 22px 16px 20px !important;
+    border-radius: 24px !important;
+  }
+
+  .current-flow-card .stage-status-row,
+  .waiting-stage-row {
+    justify-content: center !important;
+  }
+
+  .current-flow-card .stage-pill,
+  .waiting-pill {
+    max-width: 100% !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .current-flow-card .task-result-actions .secondary-button {
+    position: static !important;
+    width: 100% !important;
+  }
+
+  .task-result-actions,
+  .waiting-result-actions,
+  .personal-file-actions,
+  .category-manager-actions,
+  .material-header-actions,
+  .backup-actions,
+  .form-actions {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    width: 100% !important;
+    gap: 10px !important;
+  }
+
+  .task-result-actions button,
+  .waiting-result-actions button,
+  .personal-file-actions a,
+  .personal-file-actions button,
+  .category-manager-actions button,
+  .material-header-actions button,
+  .backup-actions button,
+  .form-actions button,
+  .backup-import-button,
+  .backup-card .primary-button {
+    width: 100% !important;
+    min-width: 0 !important;
+    text-align: center !important;
+    justify-content: center !important;
+  }
+
+  .personal-materials-card,
+  .material-folder-card {
+    grid-template-columns: 60px minmax(0, 1fr) !important;
+    gap: 12px !important;
+    padding: 18px !important;
+    align-items: center !important;
+  }
+
+  .material-folder-icon,
+  .materials-card-icon {
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+  }
+
+  .material-folder-icon img,
+  .materials-card-icon img {
+    width: 56px !important;
+    height: 56px !important;
+    object-fit: contain !important;
+  }
+
+  .material-folder-content,
+  .personal-file-main {
+    min-width: 0 !important;
+  }
+
+  .material-folder-content strong,
+  .personal-materials-card h3,
+  .materials-card h3 {
+    font-size: 20px !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .material-folder-count {
+    grid-column: 2 !important;
+    justify-self: start !important;
+  }
+
+  .materials-header-row,
+  .text-material-card-header,
+  .subcategory-panel-header,
+  .calendar-detail-header,
+  .company-mail-detail-header {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+  }
+
+  .materials-header-row h2,
+  .materials-header-row p,
+  .calendar-header h2,
+  .calendar-header p,
+  .materials-header h2,
+  .materials-header p {
+    text-align: left !important;
+  }
+
+  .text-material-card h3,
+  .material-body,
+  .material-memo,
+  .qa-block p {
+    overflow-wrap: anywhere !important;
+  }
+
+  .personal-file-card {
+    grid-template-columns: 48px minmax(0, 1fr) !important;
+    align-items: start !important;
+  }
+
+  .personal-file-actions {
+    grid-column: 1 / -1 !important;
+  }
+
+  .app-modal-overlay,
+  .calendar-detail-overlay,
+  .company-mailbox-overlay,
+  .company-mail-form-overlay {
+    padding: 10px !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+  }
+
+  .app-modal-card,
+  .calendar-detail-modal,
+  .company-mailbox-modal,
+  .company-mail-form-dialog,
+  .category-manager-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: calc(100vh - 20px) !important;
+    border-radius: 22px !important;
+    padding: 16px !important;
+    overflow-y: auto !important;
+  }
+
+  .company-mailbox-window-header {
+    height: auto !important;
+    min-height: 46px !important;
+    padding: 0 !important;
+    margin-bottom: 14px !important;
+  }
+
+  .company-mailbox-window-header h2 {
+    font-size: 22px !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .company-mailbox-close-button {
+    width: 40px !important;
+    height: 40px !important;
+    flex: 0 0 auto !important;
+  }
+
+  .company-mailbox-layout {
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow-y: visible !important;
+  }
+
+  .company-mail-list-pane,
+  .company-mail-detail-pane {
+    width: 100% !important;
+    max-height: none !important;
+  }
+
+  .company-mail-list-title {
+    padding: 14px !important;
+  }
+
+  .company-mail-list-actions {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .company-mail-list-actions button {
+    width: 100% !important;
+  }
+
+  .company-mail-list-item {
+    padding: 14px !important;
+  }
+
+  .company-mail-detail-pane {
+    padding: 16px !important;
+  }
+
+  .company-mail-detail-header h3 {
+    font-size: 22px !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .company-mail-detail-header .danger-button {
+    width: 100% !important;
+  }
+
+  .company-mail-body-card {
+    padding: 16px !important;
+    font-size: 15px !important;
+    line-height: 1.8 !important;
+  }
+
+  .company-mail-body-textarea {
+    min-height: 260px !important;
+  }
+
+  .calendar-card {
+    overflow-x: auto !important;
+  }
+
+  .fc {
+    min-width: 640px !important;
+  }
+
+  .action-list-header,
+  .action-item {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    text-align: center !important;
+  }
+
+  .action-list-header > span,
+  .action-list-header .badge,
+  .action-list-header .action-count-badge,
+  .action-item-meta {
+    position: static !important;
+    transform: none !important;
+    justify-content: center !important;
+    margin-top: 10px !important;
+  }
+
+  .action-item {
+    padding: 18px !important;
+    min-height: auto !important;
+  }
+
+  .backup-card-main {
+    min-height: auto !important;
+    display: grid !important;
+    gap: 14px !important;
+  }
+
+  .backup-card-icon,
+  .backup-card-main > div {
+    position: static !important;
+    transform: none !important;
+    justify-self: center !important;
+    max-width: 100% !important;
+  }
+
+  .backup-card h3 {
+    white-space: normal !important;
+    font-size: 24px !important;
+  }
+
+  .backup-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .auth-page {
+    padding: 18px !important;
+    align-items: center !important;
+  }
+
+  .auth-card {
+    width: 100% !important;
+    max-width: 430px !important;
+    padding: 24px !important;
+    border-radius: 26px !important;
+    overflow: hidden !important;
+  }
+
+  .auth-card .app-logo-image,
+  .auth-logo-image {
+    width: min(100%, 300px) !important;
+    max-height: 110px !important;
+    object-fit: contain !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+
+  .auth-card label {
+    align-items: stretch !important;
+    text-align: left !important;
+  }
+
+  .auth-card label > input,
+  .auth-card label .inline-input-button {
+    width: 100% !important;
+  }
+}
+
+/* Small phones */
+@media (max-width: 420px) {
+  .app {
+    width: calc(100% - 16px) !important;
+    max-width: calc(100% - 16px) !important;
+  }
+
+  .card-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .personal-materials-card,
+  .material-folder-card,
+  .personal-file-card {
+    grid-template-columns: 1fr !important;
+    justify-items: start !important;
+  }
+
+  .material-folder-count {
+    grid-column: 1 !important;
+  }
+
+  .material-folder-icon,
+  .materials-card-icon {
+    width: 52px !important;
+    height: 52px !important;
+    min-width: 52px !important;
+  }
+
+  .material-folder-icon img,
+  .materials-card-icon img {
+    width: 52px !important;
+    height: 52px !important;
+  }
+
+  .fc {
+    min-width: 580px !important;
+  }
+}
