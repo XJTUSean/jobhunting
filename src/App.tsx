@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
@@ -12,6 +12,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -29,6 +30,7 @@ import { auth, db } from "./firebase";
 import "./App.css";
 import jobflowLogo from "../assets/jobflow.png";
 import personalMaterialsIcon from "../assets/01_personal_materials.png";
+void personalMaterialsIcon;
 import selfAnalysisIcon from "../assets/02_self_analysis.png";
 import interviewQuestionsIcon from "../assets/03_interview_questions.png";
 import esEntrySheetIcon from "../assets/04_es_entry_sheet.png";
@@ -50,19 +52,18 @@ type AppPage = "companies" | "calendar" | "materials" | "backup";
 type CompanyGroupKey = "todo" | "waiting" | "finished";
 
 
-type MaterialCategory =
-  | "self_analysis"
-  | "interview_questions"
-  | "es"
-  | "company_research"
-  | "job_type_research"
-  | "self_pr"
-  | "gakuchika"
-  | "research_content"
-  | "failure_experience"
-  | "reverse_questions"
-  | "self_introduction"
-  | "career_axis";
+type MaterialCategory = string;
+
+type MaterialFolder = {
+  id: string;
+  value: MaterialCategory;
+  label: string;
+  description: string;
+  icon?: string;
+  order: number;
+  createdAt?: any;
+  updatedAt?: any;
+};
 
 type TextMaterial = {
   id: string;
@@ -354,6 +355,15 @@ function normalizeBackupArray(value: any) {
 }
 
 
+function isEmptyTextMaterialContent(material: Pick<TextMaterial, "title" | "body" | "memo">) {
+  return (
+    !String(material.title ?? "").trim() &&
+    !String(material.body ?? "").trim() &&
+    !String(material.memo ?? "").trim()
+  );
+}
+
+
 const materialCategoryOptions: {
   value: MaterialCategory;
   label: string;
@@ -414,7 +424,7 @@ const createEmptyTextMaterialForm = (
 function getMaterialCategoryLabel(category: MaterialCategory) {
   return (
     materialCategoryOptions.find((item) => item.value === category)?.label ??
-    "其他"
+    (category || "其他")
   );
 }
 
@@ -445,29 +455,14 @@ function normalizeSubcategoryName(value: string | undefined) {
 }
 
 function normalizeMaterialCategory(value: string | undefined): MaterialCategory {
-  if (
-    value === "self_analysis" ||
-    value === "interview_questions" ||
-    value === "es" ||
-    value === "company_research" ||
-    value === "job_type_research" ||
-    value === "self_pr" ||
-    value === "gakuchika" ||
-    value === "research_content" ||
-    value === "failure_experience" ||
-    value === "reverse_questions" ||
-    value === "self_introduction" ||
-    value === "career_axis"
-  ) {
-    return value;
-  }
+  const trimmed = (value ?? "").trim();
 
-  if (value === "interview") return "interview_questions";
-  if (value === "motivation") return "es";
-  if (value === "reverse_question") return "reverse_questions";
-  if (value === "research") return "research_content";
+  if (trimmed === "interview") return "interview_questions";
+  if (trimmed === "motivation") return "es";
+  if (trimmed === "reverse_question") return "reverse_questions";
+  if (trimmed === "research") return "research_content";
 
-  return "self_analysis";
+  return trimmed || "self_analysis";
 }
 
 function formatFirestoreDate(value: any) {
@@ -488,6 +483,88 @@ function escapePrintHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function buildHighlightedHtml(value: string, keyword: string) {
+  const safeValue = escapePrintHtml(value || "").replace(/\n/g, "<br />");
+  const safeKeyword = keyword.trim();
+
+  if (!safeKeyword) return safeValue;
+
+  const escapedKeyword = safeKeyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(escapedKeyword, "gi");
+
+  return safeValue.replace(regex, (match) => `<mark class="word-search-highlight">${match}</mark>`);
+}
+
+function placeCaretAtEnd(element: HTMLElement) {
+  const range = document.createRange();
+  const selection = window.getSelection();
+
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function WordEditableText(props: {
+  value: string;
+  className: string;
+  placeholder: string;
+  searchKeyword: string;
+  onChange: (value: string) => void;
+}) {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const composingRef = useRef(false);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+    if (focusedRef.current || composingRef.current) return;
+
+    element.innerHTML = buildHighlightedHtml(props.value, props.searchKeyword);
+  }, [props.value, props.searchKeyword]);
+
+  const readText = () => elementRef.current?.innerText.replace(/\n$/, "") ?? "";
+
+  return (
+    <div
+      ref={elementRef}
+      className={props.className}
+      contentEditable
+      suppressContentEditableWarning
+      data-placeholder={props.placeholder}
+      onFocus={() => {
+        focusedRef.current = true;
+        const element = elementRef.current;
+        if (!element) return;
+        element.textContent = props.value || "";
+        window.setTimeout(() => placeCaretAtEnd(element), 0);
+      }}
+      onBlur={() => {
+        focusedRef.current = false;
+        const nextValue = readText();
+        props.onChange(nextValue);
+
+        const element = elementRef.current;
+        if (element) {
+          element.innerHTML = buildHighlightedHtml(nextValue, props.searchKeyword);
+        }
+      }}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={() => {
+        composingRef.current = false;
+        props.onChange(readText());
+      }}
+      onInput={() => {
+        if (composingRef.current) return;
+        props.onChange(readText());
+      }}
+    />
+  );
 }
 
 function getAuthErrorMessage(error: unknown) {
@@ -839,11 +916,20 @@ function App() {
 
   const [textMaterials, setTextMaterials] = useState<TextMaterial[]>([]);
   const [textMaterialsLoading, setTextMaterialsLoading] = useState(false);
+  const [inlineSavingMaterialIds, setInlineSavingMaterialIds] = useState<Record<string, boolean>>({});
+  const inlineSaveTimersRef = useRef<Record<string, number>>({});
+  const inlineMaterialDraftsRef = useRef<
+    Record<string, Pick<TextMaterial, "title" | "body" | "companyName" | "memo">>
+  >({});
+  const deletingEmptyMaterialIdsRef = useRef<Set<string>>(new Set());
   const [materialSubcategories, setMaterialSubcategories] = useState<
     MaterialSubcategory[]
   >([]);
   const [materialSubcategoriesLoading, setMaterialSubcategoriesLoading] =
     useState(false);
+  const [materialFolders, setMaterialFolders] = useState<MaterialFolder[]>([]);
+  const [materialFoldersLoading, setMaterialFoldersLoading] = useState(false);
+  const [newMaterialFolderName, setNewMaterialFolderName] = useState("");
   const [isTextMaterialFormOpen, setIsTextMaterialFormOpen] = useState(false);
   const [editingTextMaterialId, setEditingTextMaterialId] = useState<
     string | null
@@ -1449,7 +1535,25 @@ function App() {
           },
         );
 
-        setTextMaterials(loadedTextMaterials);
+        const emptyTextMaterials = loadedTextMaterials.filter(isEmptyTextMaterialContent);
+        const visibleTextMaterials = loadedTextMaterials.filter(
+          (material) => !isEmptyTextMaterialContent(material),
+        );
+
+        emptyTextMaterials.forEach((material) => {
+          if (deletingEmptyMaterialIdsRef.current.has(material.id)) return;
+          deletingEmptyMaterialIdsRef.current.add(material.id);
+
+          deleteDoc(doc(db, "users", user.uid, "textMaterials", material.id))
+            .catch((error) => {
+              console.error(error);
+            })
+            .finally(() => {
+              deletingEmptyMaterialIdsRef.current.delete(material.id);
+            });
+        });
+
+        setTextMaterials(visibleTextMaterials);
         setTextMaterialsLoading(false);
       },
       (error) => {
@@ -1603,6 +1707,92 @@ function App() {
     return () => unsubscribe();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) {
+      setMaterialFolders([]);
+      setMaterialFoldersLoading(false);
+      return;
+    }
+
+    let unsubscribe: (() => void) | undefined;
+    let isCancelled = false;
+
+    const setupMaterialFolders = async () => {
+      setMaterialFoldersLoading(true);
+
+      try {
+        const settingsRef = doc(db, "users", user.uid, "settings", "materialFolders");
+        const settingsSnapshot = await getDoc(settingsRef);
+
+        if (!settingsSnapshot.exists()) {
+          await Promise.all([
+            ...materialCategoryOptions.map((category, index) =>
+              setDoc(doc(db, "users", user.uid, "materialFolders", category.value), {
+                value: category.value,
+                label: category.label,
+                description: category.description,
+                icon: category.value,
+                order: index,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              }),
+            ),
+            setDoc(settingsRef, {
+              seeded: true,
+              updatedAt: serverTimestamp(),
+            }),
+          ]);
+        }
+
+        if (isCancelled) return;
+
+        const foldersRef = collection(db, "users", user.uid, "materialFolders");
+        const foldersQuery = query(foldersRef, orderBy("order", "asc"));
+
+        unsubscribe = onSnapshot(
+          foldersQuery,
+          (snapshot) => {
+            const loadedFolders: MaterialFolder[] = snapshot.docs.map((document) => {
+              const data = document.data();
+              const value = normalizeMaterialCategory(data.value ?? document.id);
+              const defaultInfo = materialCategoryOptions.find((item) => item.value === value);
+
+              return {
+                id: document.id,
+                value,
+                label: String(data.label ?? defaultInfo?.label ?? value),
+                description: String(data.description ?? defaultInfo?.description ?? ""),
+                icon: data.icon ?? defaultInfo?.icon,
+                order: typeof data.order === "number" ? data.order : 0,
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt,
+              };
+            });
+
+            setMaterialFolders(loadedFolders);
+            setMaterialFoldersLoading(false);
+          },
+          (error) => {
+            console.error(error);
+            setMaterialFoldersLoading(false);
+            alert("读取材料库目录失败");
+          },
+        );
+      } catch (error) {
+        console.error(error);
+        setMaterialFoldersLoading(false);
+        alert("初始化材料库目录失败");
+      }
+    };
+
+    setupMaterialFolders();
+
+    return () => {
+      isCancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user]);
+
   const filteredCompanies = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
 
@@ -1707,18 +1897,46 @@ function App() {
     activePersonalFileKind,
   ]);
 
+  const allMaterialFolders = useMemo(() => {
+    const folders = materialFolders.length > 0
+      ? materialFolders
+      : materialCategoryOptions.map((category, index) => ({
+          id: category.value,
+          value: category.value,
+          label: category.label,
+          description: category.description,
+          icon: category.icon,
+          order: index,
+        }));
+
+    const existingValues = new Set(folders.map((folder) => folder.value));
+    const inferredFolders = textMaterials
+      .map((material) => material.category)
+      .filter((category, index, array) => array.indexOf(category) === index)
+      .filter((category) => !existingValues.has(category))
+      .map((category, index) => ({
+        id: category,
+        value: category,
+        label: getMaterialCategoryLabel(category),
+        description: "",
+        order: folders.length + index,
+      }));
+
+    return [...folders, ...inferredFolders].sort((a, b) => a.order - b.order);
+  }, [materialFolders, textMaterials]);
+
   const activeMaterialCategoryInfo = useMemo(() => {
     if (!activeMaterialCategory) return null;
 
     return (
-      materialCategoryOptions.find(
+      allMaterialFolders.find(
         (category) => category.value === activeMaterialCategory,
       ) ?? null
     );
-  }, [activeMaterialCategory]);
+  }, [activeMaterialCategory, allMaterialFolders]);
 
   const materialCategoryCounts = useMemo(() => {
-    return materialCategoryOptions.reduce(
+    return allMaterialFolders.reduce(
       (acc, category) => {
         acc[category.value] = textMaterials.filter(
           (material) => material.category === category.value,
@@ -1727,7 +1945,7 @@ function App() {
       },
       {} as Record<MaterialCategory, number>,
     );
-  }, [textMaterials]);
+  }, [allMaterialFolders, textMaterials]);
 
   const activeSubcategoryOptions = useMemo(() => {
     if (!activeMaterialCategory) return ["其他"];
@@ -1758,6 +1976,33 @@ function App() {
 
     return counts;
   }, [activeMaterialCategory, activeSubcategoryOptions, textMaterials]);
+
+  const getSubcategoryOptionsForCategory = (category: MaterialCategory) => {
+    const customSubcategories = materialSubcategories
+      .filter((item) => item.parentCategory === category)
+      .map((item) => normalizeSubcategoryName(item.name))
+      .filter((name) => name !== "其他");
+
+    const namesFromMaterials = textMaterials
+      .filter((material) => material.category === category)
+      .map((material) => normalizeSubcategoryName(material.subcategory))
+      .filter((name) => name !== "其他");
+
+    return ["其他", ...customSubcategories, ...namesFromMaterials].filter(
+      (name, index, array) => array.indexOf(name) === index,
+    );
+  };
+
+  const getMaterialsForCategoryAndSubcategory = (
+    category: MaterialCategory,
+    subcategoryName: string,
+  ) => {
+    return textMaterials.filter(
+      (material) =>
+        material.category === category &&
+        normalizeSubcategoryName(material.subcategory) === subcategoryName,
+    );
+  };
 
   const filteredTextMaterials = useMemo(() => {
     const keyword = materialSearchKeyword.trim().toLowerCase();
@@ -1795,6 +2040,58 @@ function App() {
     activeMaterialSubcategory,
     materialSearchKeyword,
   ]);
+
+  const documentTextMaterials = useMemo(() => {
+    if (!activeMaterialCategory) return [];
+
+    const keyword = materialSearchKeyword.trim().toLowerCase();
+
+    return textMaterials.filter((material) => {
+      if (material.category !== activeMaterialCategory) return false;
+      if (!keyword) return true;
+
+      const targetText = [
+        material.title,
+        getMaterialCategoryLabel(material.category),
+        normalizeSubcategoryName(material.subcategory),
+        material.body,
+        material.companyName,
+        material.memo,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return targetText.includes(keyword);
+    });
+  }, [textMaterials, activeMaterialCategory, materialSearchKeyword]);
+
+  const documentSubcategoryNames = useMemo(() => {
+    if (!activeMaterialCategory) return [];
+
+    const namesFromMaterials = documentTextMaterials.map((material) =>
+      normalizeSubcategoryName(material.subcategory),
+    );
+
+    return [...activeSubcategoryOptions, ...namesFromMaterials].filter(
+      (name, index, array) => array.indexOf(name) === index,
+    );
+  }, [
+    activeMaterialCategory,
+    activeSubcategoryOptions,
+    documentTextMaterials,
+  ]);
+
+  const documentMaterialsBySubcategory = useMemo(() => {
+    return documentSubcategoryNames.reduce(
+      (acc, name) => {
+        acc[name] = documentTextMaterials.filter(
+          (material) => normalizeSubcategoryName(material.subcategory) === name,
+        );
+        return acc;
+      },
+      {} as Record<string, TextMaterial[]>,
+    );
+  }, [documentSubcategoryNames, documentTextMaterials]);
 
   const calendarEvents = useMemo(() => {
     return companies
@@ -2796,6 +3093,105 @@ function App() {
     }
   };
 
+
+  const scheduleInlineTextMaterialSave = <K extends keyof Pick<TextMaterial, "title" | "body" | "companyName" | "memo">>(
+    material: TextMaterial,
+    field: K,
+    value: TextMaterial[K],
+  ) => {
+    if (!user) return;
+
+    const currentDraft = inlineMaterialDraftsRef.current[material.id] ?? {
+      title: material.title ?? "",
+      body: material.body ?? "",
+      companyName: material.companyName ?? "",
+      memo: material.memo ?? "",
+    };
+
+    const nextDraft = {
+      ...currentDraft,
+      [field]: value,
+    };
+
+    inlineMaterialDraftsRef.current[material.id] = nextDraft;
+
+    setTextMaterials((prev) =>
+      prev.map((item) =>
+        item.id === material.id ? { ...item, [field]: value } : item,
+      ),
+    );
+
+    if (inlineSaveTimersRef.current[material.id]) {
+      window.clearTimeout(inlineSaveTimersRef.current[material.id]);
+    }
+
+    setInlineSavingMaterialIds((prev) => ({ ...prev, [material.id]: true }));
+
+    inlineSaveTimersRef.current[material.id] = window.setTimeout(async () => {
+      const latestDraft = inlineMaterialDraftsRef.current[material.id] ?? nextDraft;
+      const shouldAutoDelete = isEmptyTextMaterialContent(latestDraft);
+
+      try {
+        if (shouldAutoDelete) {
+          await deleteDoc(doc(db, "users", user.uid, "textMaterials", material.id));
+          delete inlineMaterialDraftsRef.current[material.id];
+          delete inlineSaveTimersRef.current[material.id];
+          setTextMaterials((prev) => prev.filter((item) => item.id !== material.id));
+          setExpandedTextMaterialId((prev) => (prev === material.id ? null : prev));
+        } else {
+          await updateDoc(doc(db, "users", user.uid, "textMaterials", material.id), {
+            title: latestDraft.title,
+            body: latestDraft.body,
+            companyName: latestDraft.companyName,
+            memo: latestDraft.memo,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } catch (error) {
+        console.error(error);
+        alert("自动保存失败，请检查网络后再试");
+      } finally {
+        setInlineSavingMaterialIds((prev) => ({ ...prev, [material.id]: false }));
+      }
+    }, 650);
+  };
+
+  const createInlineTextMaterial = async (
+    category: MaterialCategory,
+    subcategoryName: string,
+  ) => {
+    if (!user) {
+      alert("请先登录");
+      return;
+    }
+
+    const subcategory = normalizeSubcategoryName(subcategoryName);
+
+    try {
+      const documentRef = await addDoc(collection(db, "users", user.uid, "textMaterials"), {
+        title: "新词条",
+        category,
+        subcategory,
+        body: "",
+        companyName: "",
+        memo: "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      navigateToRoute("materials");
+
+      window.setTimeout(() => {
+        document
+          .getElementById(`text-material-${documentRef.id}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 300);
+    } catch (error) {
+      console.error(error);
+      alert("新建词条失败");
+    }
+  };
+
   const openPersonalMaterialsFolder = () => {
     navigateToRoute("materials/personal");
   };
@@ -3065,6 +3461,16 @@ function App() {
     );
   };
 
+  const scrollToTextMaterial = (materialId: string) => {
+    setExpandedTextMaterialId(materialId);
+
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`text-material-${materialId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   const buildTextMaterialsPrintHtml = (
     materials: TextMaterial[],
     title: string,
@@ -3228,17 +3634,13 @@ function App() {
   const exportCurrentTextMaterialsToPdf = () => {
     if (!activeMaterialCategoryInfo) return;
 
-    const subcategoryText =
-      activeMaterialSubcategory === "全部"
-        ? "全部"
-        : activeMaterialSubcategory;
     const searchText = materialSearchKeyword.trim()
       ? ` / 搜索：${materialSearchKeyword.trim()}`
       : "";
 
     exportTextMaterialsToPdf(
-      filteredTextMaterials,
-      `${activeMaterialCategoryInfo.label} / ${subcategoryText}${searchText}`,
+      documentTextMaterials,
+      `${activeMaterialCategoryInfo.label}${searchText}`,
     );
   };
 
@@ -3287,6 +3689,381 @@ function App() {
       memo: item.memo,
     });
   };
+
+  const materialSearchText = materialSearchKeyword.trim();
+
+  const getFolderSubcategoryNames = (category: MaterialCategory) => {
+    const customSubcategories = materialSubcategories
+      .filter((item) => item.parentCategory === category)
+      .map((item) => normalizeSubcategoryName(item.name))
+      .filter((name) => name !== "其他");
+
+    const namesFromMaterials = textMaterials
+      .filter((material) => material.category === category)
+      .map((material) => normalizeSubcategoryName(material.subcategory))
+      .filter((name) => name !== "其他");
+
+    return [...customSubcategories, ...namesFromMaterials].filter(
+      (name, index, array) => array.indexOf(name) === index,
+    );
+  };
+
+  const getFolderMaterials = (category: MaterialCategory) => {
+    return textMaterials.filter((material) => material.category === category);
+  };
+
+  const getDirectFolderMaterials = (category: MaterialCategory) => {
+    return textMaterials.filter(
+      (material) =>
+        material.category === category &&
+        normalizeSubcategoryName(material.subcategory) === "其他",
+    );
+  };
+
+  const getVisibleDirectFolderMaterials = (category: MaterialCategory) => {
+    const materials = getDirectFolderMaterials(category);
+
+    if (!materialSearchText) return materials;
+
+    return materials.filter(materialMatchesSearch);
+  };
+
+  const materialMatchesSearch = (material: TextMaterial) => {
+    const keyword = materialSearchText.toLowerCase();
+    if (!keyword) return false;
+
+    return [
+      material.title,
+      getMaterialCategoryLabel(material.category),
+      normalizeSubcategoryName(material.subcategory),
+      material.body,
+      material.memo,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(keyword);
+  };
+
+  const countFolderMatches = (category: MaterialCategory) => {
+    if (!materialSearchText) return 0;
+    return getFolderMaterials(category).filter(materialMatchesSearch).length;
+  };
+
+  const countSubcategoryMatches = (category: MaterialCategory, subcategoryName: string) => {
+    if (!materialSearchText) return 0;
+    return textMaterials.filter(
+      (material) =>
+        material.category === category &&
+        normalizeSubcategoryName(material.subcategory) === subcategoryName &&
+        materialMatchesSearch(material),
+    ).length;
+  };
+
+  const getVisibleMaterialsForSubcategory = (
+    category: MaterialCategory,
+    subcategoryName: string,
+  ) => {
+    const materials = textMaterials.filter(
+      (material) =>
+        material.category === category &&
+        normalizeSubcategoryName(material.subcategory) === subcategoryName,
+    );
+
+    if (!materialSearchText) return materials;
+
+    return materials.filter(materialMatchesSearch);
+  };
+
+  const getVisibleSubcategoryNames = (category: MaterialCategory) => {
+    const subcategoryNames = getFolderSubcategoryNames(category);
+
+    if (!materialSearchText) return subcategoryNames;
+
+    return subcategoryNames.filter(
+      (subcategoryName) =>
+        getVisibleMaterialsForSubcategory(category, subcategoryName).length > 0,
+    );
+  };
+
+  const totalMaterialSearchMatches = materialSearchText
+    ? textMaterials.filter(materialMatchesSearch).length
+    : textMaterials.length;
+
+
+  const scheduleMaterialFolderSave = async (folder: MaterialFolder, label: string) => {
+    if (!user) return;
+
+    const nextLabel = label.trim();
+    if (!nextLabel || nextLabel === folder.label) return;
+
+    try {
+      await updateDoc(doc(db, "users", user.uid, "materialFolders", folder.id), {
+        label: nextLabel,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(error);
+      alert("保存大目录名称失败");
+    }
+  };
+
+  const handleWordFolderTitleBlur = (event: any, folder: MaterialFolder) => {
+    const nextLabel = (event.currentTarget.textContent ?? "").trim();
+
+    if (!nextLabel) {
+      event.currentTarget.textContent = folder.label;
+      return;
+    }
+
+    scheduleMaterialFolderSave(folder, nextLabel);
+  };
+
+  const handleWordSubcategoryTitleBlur = (
+    event: any,
+    category: MaterialCategory,
+    subcategoryName: string,
+  ) => {
+    const nextName = (event.currentTarget.textContent ?? "").trim();
+
+    if (!nextName) {
+      event.currentTarget.textContent = subcategoryName;
+      return;
+    }
+
+    renameWordSubcategory(category, subcategoryName, nextName);
+  };
+
+  const createMaterialFolder = async () => {
+    if (!user) {
+      alert("请先登录");
+      return;
+    }
+
+    const label = newMaterialFolderName.trim();
+    if (!label) return;
+
+    const value = `custom_${Date.now()}`;
+
+    try {
+      await setDoc(doc(db, "users", user.uid, "materialFolders", value), {
+        value,
+        label,
+        description: "",
+        order: allMaterialFolders.length + 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setNewMaterialFolderName("");
+    } catch (error) {
+      console.error(error);
+      alert("新建大目录失败");
+    }
+  };
+
+  const deleteMaterialFolder = async (folder: MaterialFolder) => {
+    if (!user) return;
+
+    const materialsInFolder = textMaterials.filter((material) => material.category === folder.value);
+    const subcategoriesInFolder = materialSubcategories.filter(
+      (subcategory) => subcategory.parentCategory === folder.value,
+    );
+
+    const ok = window.confirm(
+      materialsInFolder.length > 0
+        ? `确定删除大目录「${folder.label}」吗？其中 ${materialsInFolder.length} 条词条也会一起删除。`
+        : `确定删除大目录「${folder.label}」吗？`,
+    );
+
+    if (!ok) return;
+
+    try {
+      await Promise.all([
+        deleteDoc(doc(db, "users", user.uid, "materialFolders", folder.id)),
+        ...materialsInFolder.map((material) =>
+          deleteDoc(doc(db, "users", user.uid, "textMaterials", material.id)),
+        ),
+        ...subcategoriesInFolder.map((subcategory) =>
+          deleteDoc(doc(db, "users", user.uid, "materialSubcategories", subcategory.id)),
+        ),
+      ]);
+    } catch (error) {
+      console.error(error);
+      alert("删除大目录失败");
+    }
+  };
+
+  const createWordSubcategory = async (category: MaterialCategory) => {
+    if (!user) return;
+
+    const name = window.prompt("请输入小目录名称", "新小目录");
+    const nextName = normalizeSubcategoryName(name ?? "");
+    if (!nextName) return;
+
+    if (nextName === "其他") {
+      alert("不需要新建“其他”。没有小目录的内容会直接显示在大目录下面。");
+      return;
+    }
+
+    if (getFolderSubcategoryNames(category).includes(nextName)) {
+      alert("这个小目录已经存在");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "users", user.uid, "materialSubcategories"), {
+        parentCategory: category,
+        name: nextName,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(error);
+      alert("新建小目录失败");
+    }
+  };
+
+  const renameWordSubcategory = async (
+    category: MaterialCategory,
+    oldName: string,
+    nextRawName: string,
+  ) => {
+    if (!user) return;
+
+    const nextName = normalizeSubcategoryName(nextRawName);
+    if (!nextName || nextName === oldName) return;
+
+    if (nextName === "其他") {
+      alert("不能重命名为“其他”。没有小目录的内容会直接显示在大目录下面。");
+      return;
+    }
+
+    const subcategoriesToRename = materialSubcategories.filter(
+      (subcategory) =>
+        subcategory.parentCategory === category &&
+        normalizeSubcategoryName(subcategory.name) === oldName,
+    );
+    const materialsToMove = textMaterials.filter(
+      (material) =>
+        material.category === category &&
+        normalizeSubcategoryName(material.subcategory) === oldName,
+    );
+
+    try {
+      await Promise.all([
+        ...(subcategoriesToRename.length > 0
+          ? subcategoriesToRename.map((subcategory) =>
+              updateDoc(doc(db, "users", user.uid, "materialSubcategories", subcategory.id), {
+                name: nextName,
+                updatedAt: serverTimestamp(),
+              }),
+            )
+          : [
+              addDoc(collection(db, "users", user.uid, "materialSubcategories"), {
+                parentCategory: category,
+                name: nextName,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              }),
+            ]),
+        ...materialsToMove.map((material) =>
+          updateDoc(doc(db, "users", user.uid, "textMaterials", material.id), {
+            subcategory: nextName,
+            updatedAt: serverTimestamp(),
+          }),
+        ),
+      ]);
+    } catch (error) {
+      console.error(error);
+      alert("重命名小目录失败");
+    }
+  };
+
+  const deleteWordSubcategory = async (category: MaterialCategory, subcategoryName: string) => {
+    if (!user) return;
+
+    if (subcategoryName === "其他") {
+      alert("默认小目录“其他”不能删除");
+      return;
+    }
+
+    const materialsInSubcategory = textMaterials.filter(
+      (material) =>
+        material.category === category &&
+        normalizeSubcategoryName(material.subcategory) === subcategoryName,
+    );
+
+    const ok = window.confirm(
+      materialsInSubcategory.length > 0
+        ? `确定删除小目录「${subcategoryName}」吗？其中 ${materialsInSubcategory.length} 条词条也会一起删除。`
+        : `确定删除小目录「${subcategoryName}」吗？`,
+    );
+
+    if (!ok) return;
+
+    const subcategoriesToDelete = materialSubcategories.filter(
+      (subcategory) =>
+        subcategory.parentCategory === category &&
+        normalizeSubcategoryName(subcategory.name) === subcategoryName,
+    );
+
+    try {
+      await Promise.all([
+        ...subcategoriesToDelete.map((subcategory) =>
+          deleteDoc(doc(db, "users", user.uid, "materialSubcategories", subcategory.id)),
+        ),
+        ...materialsInSubcategory.map((material) =>
+          deleteDoc(doc(db, "users", user.uid, "textMaterials", material.id)),
+        ),
+      ]);
+    } catch (error) {
+      console.error(error);
+      alert("删除小目录失败");
+    }
+  };
+
+  const createWordMaterial = async (category: MaterialCategory, subcategoryName: string) => {
+    await createInlineTextMaterial(category, subcategoryName);
+  };
+
+
+  void [
+    newSubcategoryName,
+    expandedTextMaterialId,
+    personalMaterialFilesLoading,
+    personalMaterialCategoriesLoading,
+    personalMaterialCategoryCounts,
+    filteredPersonalMaterialFiles,
+    materialCategoryCounts,
+    activeSubcategoryCounts,
+    getSubcategoryOptionsForCategory,
+    getMaterialsForCategoryAndSubcategory,
+    filteredTextMaterials,
+    documentMaterialsBySubcategory,
+    updateTextMaterialFormField,
+    openMaterialCategory,
+    createMaterialSubcategoryWithName,
+    openTextCategoryManager,
+    closeTextCategoryManager,
+    renameMaterialSubcategory,
+    deleteMaterialSubcategory,
+    openAddTextMaterialForm,
+    openEditTextMaterialForm,
+    saveTextMaterial,
+    removeTextMaterial,
+    openPersonalMaterialsFolder,
+    createPersonalMaterialCategory,
+    deletePersonalMaterialCategory,
+    openPersonalCategoryManager,
+    closePersonalCategoryManager,
+    renamePersonalMaterialCategory,
+    openAddPersonalMaterialFile,
+    openEditPersonalMaterialFile,
+    savePersonalMaterialFile,
+    removePersonalMaterialFile,
+    toggleTextMaterialDetail,
+    exportCurrentTextMaterialsToPdf,
+    exportSingleTextMaterialToPdf
+  ];
 
   if (authLoading) {
     return <div className="auth-page">加载中...</div>;
@@ -4446,688 +5223,465 @@ function App() {
       )}
 
       {activePage === "materials" && (
-        <section className="materials-page">
-          {!activeMaterialCategory && !activePersonalMaterialsFolder && (
-            <>
-              <section className="personal-folder-row">
+        <section className="word-material-page">
+          <aside className="word-material-sidebar">
+            <div className="word-sidebar-header">
+              <div>
+                <strong>材料库目录</strong>
+                <span>{textMaterials.length} 条词条</span>
+              </div>
+            </div>
+
+            <div className="word-global-search">
+              <input
+                value={materialSearchKeyword}
+                onChange={(event) => setMaterialSearchKeyword(event.target.value)}
+                placeholder="全局搜索，命中的关键词会高亮"
+              />
+              {materialSearchKeyword.trim() && (
                 <button
-                  className="material-folder-card personal-material-folder-card"
+                  className="mini-button"
                   type="button"
-                  onClick={openPersonalMaterialsFolder}
+                  onClick={() => setMaterialSearchKeyword("")}
                 >
-                  <span className="material-folder-icon"><img src={personalMaterialsIcon} alt="个人材料" /></span>
-                  <span className="material-folder-content">
-                    <strong>个人材料</strong>
-                    <small>登记 Google Drive、Dropbox、OneDrive 等网盘链接</small>
-                  </span>
-                  <span className="material-folder-count">
-                    {personalMaterialFiles.length} 条
-                  </span>
+                  清除
                 </button>
-              </section>
+              )}
+            </div>
 
-              <section className="material-folder-grid">
-                {materialCategoryOptions.map((category) => (
-                  <button
-                    className="material-folder-card"
-                    key={category.value}
-                    type="button"
-                    onClick={() => openMaterialCategory(category.value)}
-                  >
-                    <span className="material-folder-icon"><img src={category.icon} alt={category.label} /></span>
-                    <span className="material-folder-content">
-                      <strong>{category.label}</strong>
-                      <small>{category.description}</small>
-                    </span>
-                    <span className="material-folder-count">
-                      {materialCategoryCounts[category.value] ?? 0} 条
-                    </span>
-                  </button>
-                ))}
-              </section>
-            </>
-          )}
+            <div className="word-create-folder-row">
+              <input
+                value={newMaterialFolderName}
+                onChange={(event) => setNewMaterialFolderName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") createMaterialFolder();
+                }}
+                placeholder="添加大目录"
+              />
+              <button className="mini-button" type="button" onClick={createMaterialFolder}>
+                添加
+              </button>
+            </div>
 
-          {activePersonalMaterialsFolder && (
-            <>
-              <div className="materials-header materials-header-row">
-                <div>
-                  <h2>
-                    <span className="folder-title-icon"><img src={personalMaterialsIcon} alt="个人材料" /></span>
-                    个人材料
-                  </h2>
-                 
-                </div>
+            <nav className="word-toc">
+              {allMaterialFolders.map((folder) => {
+                const subcategoryNames = getFolderSubcategoryNames(folder.value);
+                const folderMaterials = getFolderMaterials(folder.value);
+                const directMaterials = getVisibleDirectFolderMaterials(folder.value);
+                const folderMatchCount = countFolderMatches(folder.value);
 
-                <div className="material-header-actions">
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={openAddPersonalMaterialFile}
-                  >
-                    ＋添加个人材料
-                  </button>
-                </div>
-              </div>
+                if (materialSearchText && folderMatchCount === 0) return null;
 
-              <section className="subcategory-panel compact-subcategory-panel personal-material-category-panel">
-                <div className="compact-subcategory-row">
-                  {personalMaterialCategoryOptions.map((name) => (
-                    <button
-                      type="button"
-                      className={`subcategory-tab compact-subcategory-tab ${
-                        activePersonalFileKind === name ? "active" : ""
-                      }`}
-                      key={name}
-                      onClick={() =>
-                        setActivePersonalFileKind((prev) =>
-                          prev === name ? "全部" : name,
-                        )
-                      }
-                    >
-                      {name}
-                      <span>{personalMaterialCategoryCounts[name] ?? 0}</span>
-                    </button>
-                  ))}
-
-                  <button
-                    type="button"
-                    className="secondary-button category-manage-button"
-                    onClick={openPersonalCategoryManager}
-                  >
-                    材料类别管理
-                  </button>
-
-                  {personalMaterialCategoriesLoading && (
-                    <span className="subcategory-loading-text">类别读取中...</span>
-                  )}
-                </div>
-              </section>
-
-              {isPersonalMaterialFormOpen && (
-                <div className="app-modal-overlay" onClick={closePersonalMaterialForm}>
-                  <section
-                    className="form-card app-modal-card"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <div className="form-header">
-                      <h2>{editingPersonalMaterialFileId ? "编辑个人材料" : "添加个人材料"}</h2>
-                      <button className="secondary-button" onClick={closePersonalMaterialForm}>
-                        关闭
+                return (
+                  <details className="word-toc-folder" key={folder.value} open={materialSearchText ? true : undefined}>
+                    <summary>
+                      <button
+                        className="word-toc-toggle-button"
+                        type="button"
+                        title="展开 / 收起"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          const details = event.currentTarget.closest("details");
+                          if (details) details.open = !details.open;
+                        }}
+                      >
+                        ▾
                       </button>
-                    </div>
+                      <button
+                        className="word-toc-main-button"
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          document
+                            .getElementById(`material-folder-${folder.value}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }}
+                      >
+                        <span>{folder.label}</span>
+                        <small>
+                          {folderMatchCount > 0 ? `${folderMatchCount} 命中 / ` : ""}
+                          {folderMaterials.length}
+                        </small>
+                      </button>
+                      <button
+                        className="word-toc-icon-button"
+                        type="button"
+                        title="直接在这个大目录下添加词条"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          createWordMaterial(folder.value, "其他");
+                        }}
+                      >
+                        文
+                      </button>
+                      <button
+                        className="word-toc-icon-button"
+                        type="button"
+                        title="添加小目录"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          createWordSubcategory(folder.value);
+                        }}
+                      >
+                        ＋
+                      </button>
+                      <button
+                        className="word-toc-icon-button danger"
+                        type="button"
+                        title="删除大目录"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          deleteMaterialFolder(folder);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </summary>
 
-                    <div className="form-grid">
-                      <label>
-                        材料名称
-                        <input
-                          value={personalFileName}
-                          onChange={(event) => setPersonalFileName(event.target.value)}
-                          placeholder="例：履历书最终版 / 在学证明书 / 证件照"
-                        />
-                      </label>
-
-                      <label>
-                        材料链接
-                        <input
-                          value={personalFileUrl}
-                          onChange={(event) => setPersonalFileUrl(event.target.value)}
-                          placeholder="https://drive.google.com/..."
-                        />
-                      </label>
-
-                      <label>
-                        材料类别
-                        <select
-                          value={personalFileKind}
-                          onChange={(event) =>
-                            setPersonalFileKind(event.target.value)
-                          }
-                        >
-                          {personalMaterialCategoryOptions.map((name) => (
-                            <option key={name} value={name}>
-                              {name}
-                            </option>
+                    <div className="word-toc-subfolders">
+                      {directMaterials.length > 0 && (
+                        <div className="word-toc-blocks word-toc-direct-blocks">
+                          {directMaterials.map((material) => (
+                            <button
+                              type="button"
+                              key={material.id}
+                              className={materialMatchesSearch(material) ? "matched" : ""}
+                              onClick={() => scrollToTextMaterial(material.id)}
+                            >
+                              • {material.title || "无标题"}
+                            </button>
                           ))}
-                        </select>
-                      </label>
-                    </div>
+                        </div>
+                      )}
 
-                    <label className="memo-field">
-                      备注，可选
-                      <textarea
-                        value={personalFileMemo}
-                        onChange={(event) =>
-                          setPersonalFileMemo(event.target.value)
-                        }
-                        placeholder="例：Google Drive 共享权限已设置 / 2026年6月版"
-                      />
-                    </label>
+                      {subcategoryNames.map((subcategoryName) => {
+                        const materialsInSubcategory = textMaterials.filter(
+                          (material) =>
+                            material.category === folder.value &&
+                            normalizeSubcategoryName(material.subcategory) === subcategoryName,
+                        );
+                        const subcategoryMatchCount = countSubcategoryMatches(folder.value, subcategoryName);
 
-                    <p className="form-hint">
-                      提示：Google Drive 文件需要自行设置共享权限。建议使用“知道链接的人可查看”，否则打开链接时可能没有权限。
-                    </p>
+                        if (materialSearchText && subcategoryMatchCount === 0) return null;
 
-                    <div className="form-actions">
-                      <button
-                        className="primary-button"
-                        type="button"
-                        onClick={savePersonalMaterialFile}
-                      >
-                        {editingPersonalMaterialFileId ? "更新" : "保存"}
-                      </button>
-                    </div>
-                  </section>
-                </div>
-              )}
-
-              {isPersonalCategoryManageOpen && (
-                <div className="app-modal-overlay" onClick={closePersonalCategoryManager}>
-                  <section
-                    className="form-card app-modal-card category-manager-modal"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <div className="form-header">
-                      <div>
-                        <h2>材料类别管理</h2>
-                        <p className="form-hint">可以新建、重命名、删除个人材料类别。删除类别时，其中材料会移动到「其他」。</p>
-                      </div>
-                      <button className="secondary-button" onClick={closePersonalCategoryManager}>
-                        关闭
-                      </button>
-                    </div>
-
-                    <div className="category-create-box">
-                      <input
-                        value={newPersonalMaterialCategoryName}
-                        onChange={(event) =>
-                          setNewPersonalMaterialCategoryName(event.target.value)
-                        }
-                        placeholder="新建材料类别，例：履历书、证明书、证件照"
-                      />
-                      <button
-                        className="primary-button"
-                        type="button"
-                        onClick={createPersonalMaterialCategory}
-                      >
-                        新建类别
-                      </button>
-                    </div>
-
-                    <div className="category-manager-list">
-                      {personalMaterialCategoryOptions.map((name) => (
-                        <div className="category-manager-row" key={name}>
-                          <div>
-                            <strong>{name}</strong>
-                            <span>{personalMaterialCategoryCounts[name] ?? 0} 条</span>
-                          </div>
-                          {name === DEFAULT_PERSONAL_MATERIAL_CATEGORY ? (
-                            <span className="category-fixed-label">默认类别</span>
-                          ) : (
-                            <div className="category-manager-actions">
+                        return (
+                          <details
+                            className="word-toc-subfolder"
+                            key={`${folder.value}-${subcategoryName}`}
+                            open={materialSearchText ? true : undefined}
+                          >
+                            <summary>
                               <button
-                                className="secondary-button"
+                                className="word-toc-toggle-button"
                                 type="button"
-                                onClick={() => renamePersonalMaterialCategory(name)}
+                                title="展开 / 收起"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  const details = event.currentTarget.closest("details");
+                                  if (details) details.open = !details.open;
+                                }}
                               >
-                                重命名
+                                ▾
                               </button>
                               <button
-                                className="danger-button"
+                                className="word-toc-sub-button"
                                 type="button"
-                                onClick={() => deletePersonalMaterialCategory(name)}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  document
+                                    .getElementById(`material-subfolder-${folder.value}-${subcategoryName}`)
+                                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                }}
                               >
-                                删除
+                                <span>{subcategoryName}</span>
+                                <small>
+                                  {subcategoryMatchCount > 0 ? `${subcategoryMatchCount} 命中 / ` : ""}
+                                  {materialsInSubcategory.length}
+                                </small>
                               </button>
+                              <button
+                                className="word-toc-icon-button"
+                                type="button"
+                                title="添加词条"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  createWordMaterial(folder.value, subcategoryName);
+                                }}
+                              >
+                                ＋
+                              </button>
+                              <button
+                                className="word-toc-icon-button danger"
+                                type="button"
+                                title="删除小目录"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  deleteWordSubcategory(folder.value, subcategoryName);
+                                }}
+                              >
+                                ×
+                              </button>
+                            </summary>
+
+                            <div className="word-toc-blocks">
+                              {(materialSearchText
+                                ? materialsInSubcategory.filter(materialMatchesSearch)
+                                : materialsInSubcategory
+                              ).map((material) => (
+                                <button
+                                  type="button"
+                                  key={material.id}
+                                  className={materialMatchesSearch(material) ? "matched" : ""}
+                                  onClick={() => scrollToTextMaterial(material.id)}
+                                >
+                                  • {material.title || "无标题"}
+                                </button>
+                              ))}
+
+                              {materialsInSubcategory.length === 0 && (
+                                <button
+                                  type="button"
+                                  className="word-toc-empty-create"
+                                  onClick={() => createWordMaterial(folder.value, subcategoryName)}
+                                >
+                                  ＋添加词条
+                                </button>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      ))}
+                          </details>
+                        );
+                      })}
+
+                      {!materialSearchText && folderMaterials.length === 0 && subcategoryNames.length === 0 && (
+                        <button
+                          type="button"
+                          className="word-toc-empty-create"
+                          onClick={() => createWordMaterial(folder.value, "其他")}
+                        >
+                          ＋添加词条
+                        </button>
+                      )}
                     </div>
-                  </section>
-                </div>
-              )}
+                  </details>
+                );
+              })}
+            </nav>
+          </aside>
 
-              <article className="materials-card personal-materials-panel">
-                <p className="selected-file-preview">
-                  提示：Google Drive 文件需要自行设置共享权限。建议使用“知道链接的人可查看”，否则打开链接时可能没有权限。
-                </p>
-
-                <div className="personal-files-toolbar">
-                  <strong>已登记个人材料</strong>
-                  <input
-                    value={personalFileSearchKeyword}
-                    onChange={(event) =>
-                      setPersonalFileSearchKeyword(event.target.value)
-                    }
-                    placeholder="搜索材料名、类别、链接、备注"
-                  />
-                </div>
-
-                <div className="personal-file-list">
-                  {personalMaterialFilesLoading && (
-                    <div className="empty-card">个人材料读取中...</div>
-                  )}
-
-                  {!personalMaterialFilesLoading &&
-                    personalMaterialFiles.length === 0 && (
-                      <div className="empty-card">
-                        还没有登记个人材料。可以先把履历书、证明书、证件照等放到 Google Drive，然后在这里保存链接。
-                      </div>
-                    )}
-
-                  {!personalMaterialFilesLoading &&
-                    personalMaterialFiles.length > 0 &&
-                    filteredPersonalMaterialFiles.length === 0 && (
-                      <div className="empty-card">
-                        没有找到符合搜索条件的个人材料。
-                      </div>
-                    )}
-
-                  {!personalMaterialFilesLoading &&
-                    filteredPersonalMaterialFiles.map((file) => (
-                      <div className="personal-file-card" key={file.id}>
-                        <div className="personal-file-icon">🔗</div>
-                        <div className="personal-file-main">
-                          <strong>{file.name}</strong>
-                          <div className="personal-file-meta">
-                            <span>{getPersonalMaterialKindLabel(file.kind)}</span>
-                            {formatFirestoreDate(file.createdAt) && (
-                              <span>
-                                登记：{formatFirestoreDate(file.createdAt)}
-                              </span>
-                            )}
-                            {formatFirestoreDate(file.updatedAt) && (
-                              <span>
-                                更新：{formatFirestoreDate(file.updatedAt)}
-                              </span>
-                            )}
-                          </div>
-                          <a
-                            className="personal-file-url"
-                            href={file.fileUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {file.fileUrl}
-                          </a>
-                          {file.memo && (
-                            <p className="personal-file-memo">{file.memo}</p>
-                          )}
-                        </div>
-                        <div className="personal-file-actions">
-                          <a
-                            className="secondary-button"
-                            href={file.fileUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            打开链接
-                          </a>
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            onClick={() => openEditPersonalMaterialFile(file)}
-                          >
-                            编辑
-                          </button>
-                          <button
-                            className="danger-button"
-                            type="button"
-                            onClick={() => removePersonalMaterialFile(file)}
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </article>
-            </>
-          )}
-
-          {activeMaterialCategory && activeMaterialCategoryInfo && (
-            <>
-              <div className="materials-header materials-header-row">
-                <div>
-                  <h2>
-                    <span className="folder-title-icon">
-                      <img src={activeMaterialCategoryInfo.icon} alt={activeMaterialCategoryInfo.label} />
-                    </span>
-                    {activeMaterialCategoryInfo.label}
-                  </h2>
-                  <p>{activeMaterialCategoryInfo.description}</p>
-                </div>
-
-                <div className="material-header-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={exportCurrentTextMaterialsToPdf}
-                  >
-                    导出当前显示为 PDF
-                  </button>
-                  <button className="primary-button" onClick={openAddTextMaterialForm}>
-                    ＋添加词条
-                  </button>
-                </div>
+          <main className="word-document-shell">
+            <div className="word-document-toolbar">
+              <div>
+                <h2>材料库</h2>
+                <p></p>
               </div>
+              <span>
+                {materialFoldersLoading || materialSubcategoriesLoading || textMaterialsLoading
+                  ? "同步中..."
+                  : materialSearchKeyword.trim()
+                    ? `正在高亮搜索：${materialSearchKeyword.trim()}`
+                    : "已同步"}
+              </span>
+            </div>
 
-              <section className="subcategory-panel compact-subcategory-panel">
-                <div className="compact-subcategory-row">
-                  {activeSubcategoryOptions.map((name) => (
-                    <button
-                      type="button"
-                      className={`subcategory-tab compact-subcategory-tab ${
-                        activeMaterialSubcategory === name ? "active" : ""
-                      }`}
-                      key={name}
-                      onClick={() =>
-                        setActiveMaterialSubcategory((prev) =>
-                          prev === name ? "全部" : name,
-                        )
-                      }
-                    >
-                      {name}
-                      <span>{activeSubcategoryCounts[name] ?? 0}</span>
-                    </button>
-                  ))}
+            {allMaterialFolders.length === 0 && !materialFoldersLoading && (
+              <div className="empty-card">还没有大目录。请在左侧添加一个大目录。</div>
+            )}
 
-                  <button
-                    type="button"
-                    className="secondary-button category-manage-button"
-                    onClick={openTextCategoryManager}
-                  >
-                    词条分类管理
-                  </button>
+            {materialSearchText && totalMaterialSearchMatches === 0 && (
+              <div className="empty-card">没有找到匹配的词条。</div>
+            )}
 
-                  {materialSubcategoriesLoading && (
-                    <span className="subcategory-loading-text">分类读取中...</span>
-                  )}
-                </div>
-              </section>
+            <div className="word-document-pages">
+              {allMaterialFolders.map((folder) => {
+                const subcategoryNames = getVisibleSubcategoryNames(folder.value);
 
-              {isTextCategoryManageOpen && (
-                <div className="app-modal-overlay" onClick={closeTextCategoryManager}>
+                if (materialSearchText && countFolderMatches(folder.value) === 0) return null;
+
+                return (
                   <section
-                    className="form-card app-modal-card category-manager-modal"
-                    onClick={(event) => event.stopPropagation()}
+                    className="word-document-page"
+                    id={`material-folder-${folder.value}`}
+                    key={folder.value}
                   >
-                    <div className="form-header">
-                      <div>
-                        <h2>词条分类管理</h2>
-                        <p className="form-hint">可以新建、重命名、删除当前文件夹里的词条分类。删除分类时，其中词条会移动到「其他」。</p>
+                    <div className="word-folder-heading">
+                      <div
+                        className="word-folder-title"
+                        contentEditable
+                        suppressContentEditableWarning
+                        onBlur={(event) => handleWordFolderTitleBlur(event, folder)}
+                      >
+                        {folder.label}
                       </div>
-                      <button className="secondary-button" onClick={closeTextCategoryManager}>
-                        关闭
-                      </button>
+                      <div className="word-folder-actions">
+                        <button
+                          className="mini-button"
+                          type="button"
+                          onClick={() => createWordMaterial(folder.value, "其他")}
+                        >
+                          ＋添加词条
+                        </button>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => createWordSubcategory(folder.value)}
+                        >
+                          ＋添加小目录
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="category-create-box">
-                      <input
-                        value={newSubcategoryName}
-                        onChange={(event) => setNewSubcategoryName(event.target.value)}
-                        placeholder="新建词条分类，例：通用 / 公司别 / 300字 / 最终版"
-                      />
-                      <button
-                        className="primary-button"
-                        type="button"
-                        onClick={() => createMaterialSubcategoryWithName(newSubcategoryName)}
-                      >
-                        新建分类
-                      </button>
-                    </div>
-
-                    <div className="category-manager-list">
-                      {activeSubcategoryOptions.map((name) => (
-                        <div className="category-manager-row" key={name}>
-                          <div>
-                            <strong>{name}</strong>
-                            <span>{activeSubcategoryCounts[name] ?? 0} 条</span>
-                          </div>
-                          {name === "其他" ? (
-                            <span className="category-fixed-label">默认分类</span>
-                          ) : (
-                            <div className="category-manager-actions">
-                              <button
-                                className="secondary-button"
-                                type="button"
-                                onClick={() => renameMaterialSubcategory(name)}
-                              >
-                                重命名
-                              </button>
-                              <button
-                                className="danger-button"
-                                type="button"
-                                onClick={() => deleteMaterialSubcategory(name)}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          )}
+                    {getVisibleDirectFolderMaterials(folder.value).length === 0 &&
+                      !materialSearchText &&
+                      subcategoryNames.length === 0 && (
+                        <div
+                          className="word-empty-line"
+                          onClick={() => createWordMaterial(folder.value, "其他")}
+                        >
+                          点击这里在「{folder.label}」下面直接添加第一条内容
                         </div>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              )}
+                      )}
 
-              {isTextMaterialFormOpen && (
-                <div className="app-modal-overlay" onClick={closeTextMaterialForm}>
-                  <section
-                    className="form-card app-modal-card"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                  <div className="form-header">
-                    <h2>{editingTextMaterialId ? "编辑词条" : "添加词条"}</h2>
-                    <button className="secondary-button" onClick={closeTextMaterialForm}>
-                      关闭
-                    </button>
-                  </div>
+                    {getVisibleDirectFolderMaterials(folder.value).length > 0 && (
+                      <div className="word-folder-direct-section">
+                        {getVisibleDirectFolderMaterials(folder.value).map((material) => (
+                          <article
+                            className={`word-material-block ${materialMatchesSearch(material) ? "matched" : ""}`}
+                            id={`text-material-${material.id}`}
+                            key={material.id}
+                          >
+                            <WordEditableText
+                              className="word-block-title"
+                              value={material.title}
+                              placeholder="输入标题"
+                              searchKeyword={materialSearchText}
+                              onChange={(value) =>
+                                scheduleInlineTextMaterialSave(material, "title", value)
+                              }
+                            />
 
-                  <div className="current-detail-title">
-                    <strong>当前文件夹：</strong>
-                    <span>{getMaterialCategoryLabel(textMaterialForm.category)}</span>
-                  </div>
+                            <WordEditableText
+                              className="word-block-body"
+                              value={material.body}
+                              placeholder="点击这里直接输入正文。内容会自动保存。"
+                              searchKeyword={materialSearchText}
+                              onChange={(value) =>
+                                scheduleInlineTextMaterialSave(material, "body", value)
+                              }
+                            />
 
-                  <div className="form-grid">
-                    <label>
-                      标题
-                      <input
-                        value={textMaterialForm.title}
-                        onChange={(event) =>
-                          updateTextMaterialFormField("title", event.target.value)
-                        }
-                        placeholder="例：学生時代に力を入れたこと / 自己PR主版本 / Panasonic ES / 研究内容1分钟版"
-                      />
-                    </label>
+                            <WordEditableText
+                              className="word-block-memo"
+                              value={material.memo}
+                              placeholder="备注，可空"
+                              searchKeyword={materialSearchText}
+                              onChange={(value) =>
+                                scheduleInlineTextMaterialSave(material, "memo", value)
+                              }
+                            />
 
-                    <label>
-                      词条分类
-                      <select
-                        value={textMaterialForm.subcategory}
-                        onChange={(event) =>
-                          updateTextMaterialFormField("subcategory", event.target.value)
-                        }
-                      >
-                        {activeSubcategoryOptions.map((name) => (
-                          <option value={name} key={name}>
-                            {name}
-                          </option>
+                            <div className="word-autosave-line">
+                              {inlineSavingMaterialIds[material.id] ? "保存中..." : "已自动保存"}
+                            </div>
+                          </article>
                         ))}
-                      </select>
-                    </label>
+                      </div>
+                    )}
 
-                    <label>
-                      关联公司，可选
-                      <input
-                        value={textMaterialForm.companyName}
-                        onChange={(event) =>
-                          updateTextMaterialFormField(
-                            "companyName",
-                            event.target.value,
-                          )
-                        }
-                        placeholder="例：パナソニック / teamLab"
-                      />
-                    </label>
-
-                  </div>
-
-                  <label className="memo-field">
-                    回答 / 正文
-                    <textarea
-                      value={textMaterialForm.body}
-                      onChange={(event) =>
-                        updateTextMaterialFormField("body", event.target.value)
-                      }
-                      placeholder="这里写这个词条的主体内容。面试问题集可以把标题写成问题，这里写回答。ES、自我分析等分类可以把这里作为正文。"
-                    />
-                  </label>
-
-                  <label className="memo-field">
-                    备注，可选
-                    <textarea
-                      value={textMaterialForm.memo}
-                      onChange={(event) =>
-                        updateTextMaterialFormField("memo", event.target.value)
-                      }
-                      placeholder="例：需要压缩到300字 / 某家公司专用 / 面试前重点背诵"
-                    />
-                  </label>
-
-                  <div className="form-actions">
-                    <button className="primary-button" onClick={saveTextMaterial}>
-                      {editingTextMaterialId ? "更新" : "保存"}
-                    </button>
-                  </div>
-                  </section>
-                </div>
-              )}
-
-              <section className="text-materials-section">
-                <div className="materials-toolbar single-search-toolbar">
-                  <input
-                    value={materialSearchKeyword}
-                    onChange={(event) => setMaterialSearchKeyword(event.target.value)}
-                    placeholder="在当前分类内按标题、正文、关联公司、备注搜索"
-                  />
-                </div>
-
-                <div className="material-summary-row">
-                  <span>
-                    {activeMaterialCategoryInfo.label} / {activeMaterialSubcategory} 共 {activeMaterialSubcategory === "全部" ? materialCategoryCounts[activeMaterialCategory] ?? 0 : activeSubcategoryCounts[activeMaterialSubcategory] ?? 0} 条
-                  </span>
-                  <span>当前显示 {filteredTextMaterials.length} 条</span>
-                </div>
-
-                {textMaterialsLoading && <div className="empty-card">加载中...</div>}
-
-                {!textMaterialsLoading &&
-                  (materialCategoryCounts[activeMaterialCategory] ?? 0) === 0 && (
-                    <div className="empty-card">
-                      这个分类里还没有词条。点击“＋添加词条”开始保存内容。
-                    </div>
-                  )}
-
-                {!textMaterialsLoading &&
-                  (materialCategoryCounts[activeMaterialCategory] ?? 0) > 0 &&
-                  filteredTextMaterials.length === 0 && (
-                    <div className="empty-card">没有找到符合条件的词条。</div>
-                  )}
-
-                {!textMaterialsLoading && filteredTextMaterials.length > 0 && (
-                  <div className="text-material-list">
-                    {filteredTextMaterials.map((material) => {
-                      const isExpanded = expandedTextMaterialId === material.id;
+                    {subcategoryNames.map((subcategoryName) => {
+                      const materialsInSubcategory = getVisibleMaterialsForSubcategory(
+                        folder.value,
+                        subcategoryName,
+                      );
 
                       return (
-                        <article
-                          className={`text-material-card ${isExpanded ? "expanded" : ""}`}
-                          key={material.id}
+                        <section
+                          className="word-subfolder-section"
+                          id={`material-subfolder-${folder.value}-${subcategoryName}`}
+                          key={`${folder.value}-${subcategoryName}`}
                         >
-                          <div className="text-material-card-header">
-                            <div>
-                              <div className="badge-row material-badge-row">
-                                <span className={`badge material-category-${material.category}`}>
-                                  {getMaterialCategoryLabel(material.category)}
-                                </span>
-                                <span className="badge material-subcategory-badge">
-                                  {normalizeSubcategoryName(material.subcategory)}
-                                </span>
-                                {material.companyName && (
-                                  <span className="badge material-company-badge">
-                                    {material.companyName}
-                                  </span>
-                                )}
-                              </div>
-
-                              <h3>{material.title}</h3>
+                          <div className="word-subfolder-heading">
+                            <div
+                              className="word-subfolder-title"
+                              contentEditable={subcategoryName !== "其他"}
+                              suppressContentEditableWarning
+                              onBlur={(event) =>
+                                handleWordSubcategoryTitleBlur(
+                                  event,
+                                  folder.value,
+                                  subcategoryName,
+                                )
+                              }
+                            >
+                              {subcategoryName}
                             </div>
 
-                            <div className="card-actions">
-                              <button
-                                className="secondary-button"
-                                onClick={() => toggleTextMaterialDetail(material.id)}
-                              >
-                                {isExpanded ? "收起" : "查看详情"}
-                              </button>
-                              <button
-                                className="secondary-button"
-                                onClick={() => exportSingleTextMaterialToPdf(material)}
-                              >
-                                导出PDF
-                              </button>
-                              <button
-                                className="secondary-button"
-                                onClick={() => openEditTextMaterialForm(material)}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                className="danger-button"
-                                onClick={() => removeTextMaterial(material)}
-                              >
-                                删除
-                              </button>
-                            </div>
+                            <button
+                              className="mini-button"
+                              type="button"
+                              onClick={() => createWordMaterial(folder.value, subcategoryName)}
+                            >
+                              ＋添加词条
+                            </button>
                           </div>
 
-                          {material.body && (
-                            <p
-                              className={`material-body ${
-                                isExpanded ? "material-body-full" : "material-body-preview"
-                              }`}
+                          {materialsInSubcategory.length === 0 && (
+                            <div
+                              className="word-empty-line"
+                              onClick={() => createWordMaterial(folder.value, subcategoryName)}
                             >
-                              {material.body}
-                            </p>
-                          )}
-
-                          {isExpanded && material.memo && (
-                            <p className="material-memo">
-                              <strong>备注：</strong>
-                              {material.memo}
-                            </p>
-                          )}
-
-                          {isExpanded && (
-                            <div className="material-meta-row">
-                              {formatFirestoreDate(material.createdAt) && (
-                                <span>创建：{formatFirestoreDate(material.createdAt)}</span>
-                              )}
-                              {formatFirestoreDate(material.updatedAt) && (
-                                <span>更新：{formatFirestoreDate(material.updatedAt)}</span>
-                              )}
+                              点击这里添加第一条内容
                             </div>
                           )}
-                        </article>
+
+                          {materialsInSubcategory.map((material) => (
+                            <article
+                              className={`word-material-block ${materialMatchesSearch(material) ? "matched" : ""}`}
+                              id={`text-material-${material.id}`}
+                              key={material.id}
+                            >
+                              <WordEditableText
+                                className="word-block-title"
+                                value={material.title}
+                                placeholder="输入标题"
+                                searchKeyword={materialSearchText}
+                                onChange={(value) =>
+                                  scheduleInlineTextMaterialSave(material, "title", value)
+                                }
+                              />
+
+                              <WordEditableText
+                                className="word-block-body"
+                                value={material.body}
+                                placeholder="点击这里直接输入正文。内容会自动保存。"
+                                searchKeyword={materialSearchText}
+                                onChange={(value) =>
+                                  scheduleInlineTextMaterialSave(material, "body", value)
+                                }
+                              />
+
+                              <WordEditableText
+                                className="word-block-memo"
+                                value={material.memo}
+                                placeholder="备注，可空"
+                                searchKeyword={materialSearchText}
+                                onChange={(value) =>
+                                  scheduleInlineTextMaterialSave(material, "memo", value)
+                                }
+                              />
+
+                              <div className="word-autosave-line">
+                                {inlineSavingMaterialIds[material.id] ? "保存中..." : "已自动保存"}
+                              </div>
+                            </article>
+                          ))}
+                        </section>
                       );
                     })}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
+                  </section>
+                );
+              })}
+            </div>
+          </main>
         </section>
       )}
 
